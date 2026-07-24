@@ -27,12 +27,12 @@ APP_AUTHOR	:=	naga
 APP_VERSION	:=	1.2.0
 
 #---------------------------------------------------------------------------------
-ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
+ARCH	:=	-mcpu=cortex-a57+crypto+crc+simd -mtune=cortex-a57 -mtp=soft -fPIE
 LTOFLAGS := -flto=auto -fuse-linker-plugin
 
 PKGS	:=	sdl2 SDL2_ttf SDL2_image libcurl
 
-CFLAGS	:=	`$(PREFIX)pkg-config --cflags $(PKGS)` -Wall -Wextra -O3 -DNDEBUG $(LTOFLAGS) \
+CFLAGS	:=	`$(PREFIX)pkg-config --cflags $(PKGS)` -Wall -Wextra -Ofast --param l1-cache-size=32 --param l2-cache-size=2048 -DNDEBUG $(LTOFLAGS) \
 			-ffunction-sections -fdata-sections -fno-ident \
 			-ffile-prefix-map=$(CURDIR)=. -fmacro-prefix-map=$(CURDIR)=. \
 			$(ARCH) $(DEFINES)
