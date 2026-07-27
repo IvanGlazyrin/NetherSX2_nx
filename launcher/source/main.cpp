@@ -1541,9 +1541,11 @@ static void scanGames(const std::vector<std::string> &sourcePaths) {
     struct dirent *e;
     while ((e = readdir(d))) {
       if(e->d_name[0]=='.') continue;
+      // Check extension first to avoid expensive stat() system call and string allocations
+      if(!hasDiscExt(e->d_name)) continue;
       std::string full = join(source, e->d_name);
       struct stat sst{};
-      if (stat(full.c_str(), &sst) != 0 || !S_ISREG(sst.st_mode) || !hasDiscExt(e->d_name)) continue;
+      if (stat(full.c_str(), &sst) != 0 || !S_ISREG(sst.st_mode)) continue;
       if(!seenPaths.insert(pathIdentity(full)).second) continue;
       Game g;
       g.file = e->d_name;
