@@ -995,14 +995,18 @@ static bool quick_menu_persist_setting(const char *path, const char *key, const 
   }
   bool replaced = false;
   char line[2048];
+
+  // ⚡ Bolt Optimization: Hoisted strlen(key) outside of the while-loop to avoid redundant evaluation.
+  // Impact: Avoids calculating O(N) length on every iteration for large preference files.
+  size_t key_len = strlen(key);
   while (input && fgets(line, sizeof(line), input)) {
     char *start = line;
     while (*start && isspace((unsigned char)*start)) start++;
     char *equals = strchr(start, '=');
     char *end = equals;
     while (end && end > start && isspace((unsigned char)end[-1])) end--;
-    if (equals && (size_t)(end - start) == strlen(key) &&
-        !memcmp(start, key, strlen(key))) {
+    if (equals && (size_t)(end - start) == key_len &&
+        !memcmp(start, key, key_len)) {
       fprintf(output, "%s = %s\n", key, value);
       replaced = true;
     } else {
