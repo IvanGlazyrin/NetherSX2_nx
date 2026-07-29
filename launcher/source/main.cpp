@@ -906,6 +906,24 @@ static const std::string &ellipsizedText(TTF_Font *font, const std::string &text
   auto found=g_ellipsisCache.find(key);
   if(found!=g_ellipsisCache.end()){ found->second.use=++g_textUseSerial; return found->second.text; }
 
+  auto insertToCache=[&](EllipsisKey k, std::string val) -> const std::string& {
+    if(g_ellipsisCache.size()>=ELLIPSIS_CACHE_LIMIT){
+      auto victim=g_ellipsisCache.begin();
+      for(auto it=std::next(g_ellipsisCache.begin());it!=g_ellipsisCache.end();++it)
+        if(it->second.use<victim->second.use) victim=it;
+      g_ellipsisCache.erase(victim);
+    }
+    auto inserted=g_ellipsisCache.emplace(std::move(k),EllipsisEntry{std::move(val),++g_textUseSerial});
+    return inserted.first->second.text;
+  };
+
+  // Optimization: If the text already fits within the max width bounds,
+  // return it directly via cache insertion to avoid the expensive UTF-8
+  // boundary parsing and multiple font measurements during binary search.
+  if(textW(font,text.c_str())<=maxWidth){
+    return insertToCache(std::move(key), text);
+  }
+
   std::vector<size_t> boundaries{0};
   for(size_t i=0;i<text.size();){
     const unsigned char lead=(unsigned char)text[i];
@@ -921,14 +939,7 @@ static const std::string &ellipsizedText(TTF_Font *font, const std::string &text
     if(textW(font,candidate.c_str())<=maxWidth) low=middle; else high=middle-1;
   }
   std::string shortened=text.substr(0,boundaries[low])+"...";
-  if(g_ellipsisCache.size()>=ELLIPSIS_CACHE_LIMIT){
-    auto victim=g_ellipsisCache.begin();
-    for(auto it=std::next(g_ellipsisCache.begin());it!=g_ellipsisCache.end();++it)
-      if(it->second.use<victim->second.use) victim=it;
-    g_ellipsisCache.erase(victim);
-  }
-  auto inserted=g_ellipsisCache.emplace(std::move(key),EllipsisEntry{std::move(shortened),++g_textUseSerial});
-  return inserted.first->second.text;
+  return insertToCache(std::move(key), std::move(shortened));
 }
 static void drawTextR(TTF_Font*f,int xr,int y,const char*s,SDL_Color c){ drawText(f,xr-textW(f,s),y,s,c); }
 static void drawTextC(TTF_Font*f,int cx,int y,const char*s,SDL_Color c){ drawText(f,cx-textW(f,s)/2,y,s,c); }
