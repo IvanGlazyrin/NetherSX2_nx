@@ -214,17 +214,28 @@ const char *fix_path(const char *path) {
 
   if (!path)
     return path;
+
+  // Fast path: avoid loop and string comparisons for the overwhelming majority
+  // of paths that aren't absolute Android app paths.
+  if (path[0] != '/' || (path[1] != 'd' && path[1] != 's'))
+    return path;
+
   // Redirect Android application paths into the data directory.
-  static const char *const android_prefixes[] = {
-    "/data/user/0/xyz.aethersx2.android/files",
-    "/data/data/xyz.aethersx2.android/files",
-    "/storage/emulated/0/Android/data/xyz.aethersx2.android/files",
-    "/sdcard/Android/data/xyz.aethersx2.android/files",
+  static const struct {
+    const char *prefix;
+    size_t len;
+  } android_prefixes[] = {
+#define PFX(x) { x, sizeof(x) - 1 }
+    PFX("/data/user/0/xyz.aethersx2.android/files"),
+    PFX("/data/data/xyz.aethersx2.android/files"),
+    PFX("/storage/emulated/0/Android/data/xyz.aethersx2.android/files"),
+    PFX("/sdcard/Android/data/xyz.aethersx2.android/files"),
+#undef PFX
   };
+
   for (unsigned i = 0; i < sizeof(android_prefixes) / sizeof(*android_prefixes); i++) {
-    size_t plen = strlen(android_prefixes[i]);
-    if (!strncmp(path, android_prefixes[i], plen)) {
-      const char *rest = path + plen;
+    if (!strncmp(path, android_prefixes[i].prefix, android_prefixes[i].len)) {
+      const char *rest = path + android_prefixes[i].len;
       char *out = buf[which];
       which ^= 1;
       snprintf(out, sizeof(buf[0]), "%s%s", DATA_ROOT, rest);
