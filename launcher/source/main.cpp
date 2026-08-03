@@ -16,6 +16,7 @@
 #include <array>
 #include <climits>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <algorithm>
 #include <functional>
@@ -488,13 +489,37 @@ struct TextKey {
   }
 };
 
+// Bolt Performance Optimization:
+// Use std::string_view for map lookups to avoid allocating a new std::string
+// on every text render or metric query. This leverages C++20 transparent hashing
+// (`using is_transparent = void`) to eliminate hundreds of allocations per frame.
+struct TextKeyView {
+  TTF_Font *font;
+  Uint32 color;
+  std::string_view text;
+};
+
 struct TextKeyHash {
+  using is_transparent = void;
   size_t operator()(const TextKey &key) const {
     size_t hash = std::hash<std::string>{}(key.text);
     hash ^= std::hash<TTF_Font *>{}(key.font) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= std::hash<Uint32>{}(key.color) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     return hash;
   }
+  size_t operator()(const TextKeyView &key) const {
+    size_t hash = std::hash<std::string_view>{}(key.text);
+    hash ^= std::hash<TTF_Font *>{}(key.font) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<Uint32>{}(key.color) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    return hash;
+  }
+};
+
+struct TextKeyEqual {
+  using is_transparent = void;
+  bool operator()(const TextKey &lhs, const TextKey &rhs) const { return lhs == rhs; }
+  bool operator()(const TextKey &lhs, const TextKeyView &rhs) const { return lhs.font == rhs.font && lhs.color == rhs.color && lhs.text == rhs.text; }
+  bool operator()(const TextKeyView &lhs, const TextKey &rhs) const { return lhs.font == rhs.font && lhs.color == rhs.color && lhs.text == rhs.text; }
 };
 
 struct TextEntry {
@@ -511,11 +536,28 @@ struct MetricKey {
   bool operator==(const MetricKey &other) const { return font == other.font && text == other.text; }
 };
 
+struct MetricKeyView {
+  TTF_Font *font;
+  std::string_view text;
+};
+
 struct MetricKeyHash {
+  using is_transparent = void;
   size_t operator()(const MetricKey &key) const {
     size_t hash = std::hash<std::string>{}(key.text);
     return hash ^ (std::hash<TTF_Font *>{}(key.font) + 0x9e3779b9 + (hash << 6) + (hash >> 2));
   }
+  size_t operator()(const MetricKeyView &key) const {
+    size_t hash = std::hash<std::string_view>{}(key.text);
+    return hash ^ (std::hash<TTF_Font *>{}(key.font) + 0x9e3779b9 + (hash << 6) + (hash >> 2));
+  }
+};
+
+struct MetricKeyEqual {
+  using is_transparent = void;
+  bool operator()(const MetricKey &lhs, const MetricKey &rhs) const { return lhs == rhs; }
+  bool operator()(const MetricKey &lhs, const MetricKeyView &rhs) const { return lhs.font == rhs.font && lhs.text == rhs.text; }
+  bool operator()(const MetricKeyView &lhs, const MetricKey &rhs) const { return lhs.font == rhs.font && lhs.text == rhs.text; }
 };
 
 struct MetricEntry { int width; Uint64 use; };
@@ -529,20 +571,40 @@ struct EllipsisKey {
   }
 };
 
+struct EllipsisKeyView {
+  TTF_Font *font;
+  int maxWidth;
+  std::string_view text;
+};
+
 struct EllipsisKeyHash {
+  using is_transparent = void;
   size_t operator()(const EllipsisKey &key) const {
     size_t hash = std::hash<std::string>{}(key.text);
     hash ^= std::hash<TTF_Font *>{}(key.font) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     hash ^= std::hash<int>{}(key.maxWidth) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     return hash;
   }
+  size_t operator()(const EllipsisKeyView &key) const {
+    size_t hash = std::hash<std::string_view>{}(key.text);
+    hash ^= std::hash<TTF_Font *>{}(key.font) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    hash ^= std::hash<int>{}(key.maxWidth) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    return hash;
+  }
+};
+
+struct EllipsisKeyEqual {
+  using is_transparent = void;
+  bool operator()(const EllipsisKey &lhs, const EllipsisKey &rhs) const { return lhs == rhs; }
+  bool operator()(const EllipsisKey &lhs, const EllipsisKeyView &rhs) const { return lhs.font == rhs.font && lhs.maxWidth == rhs.maxWidth && lhs.text == rhs.text; }
+  bool operator()(const EllipsisKeyView &lhs, const EllipsisKey &rhs) const { return lhs.font == rhs.font && lhs.maxWidth == rhs.maxWidth && lhs.text == rhs.text; }
 };
 
 struct EllipsisEntry { std::string text; Uint64 use; };
 
-static std::unordered_map<TextKey, TextEntry, TextKeyHash> g_textCache;
-static std::unordered_map<MetricKey, MetricEntry, MetricKeyHash> g_metricCache;
-static std::unordered_map<EllipsisKey, EllipsisEntry, EllipsisKeyHash> g_ellipsisCache;
+static std::unordered_map<TextKey, TextEntry, TextKeyHash, TextKeyEqual> g_textCache;
+static std::unordered_map<MetricKey, MetricEntry, MetricKeyHash, MetricKeyEqual> g_metricCache;
+static std::unordered_map<EllipsisKey, EllipsisEntry, EllipsisKeyHash, EllipsisKeyEqual> g_ellipsisCache;
 static size_t g_textCacheBytes = 0;
 static Uint64 g_textUseSerial = 0;
 static constexpr size_t TEXT_CACHE_LIMIT = 512;
@@ -555,13 +617,14 @@ static Uint32 packColor(SDL_Color color) {
 }
 
 static void rememberTextMetric(TTF_Font *font, const std::string &text, int width) {
-  MetricKey key{font, text};
-  auto found = g_metricCache.find(key);
+  MetricKeyView key_view{font, text};
+  auto found = g_metricCache.find(key_view);
   if (found != g_metricCache.end()) {
     found->second.width = width;
     found->second.use = ++g_textUseSerial;
     return;
   }
+  MetricKey key{font, text};
   if (g_metricCache.size() >= METRIC_CACHE_LIMIT) {
     auto victim = g_metricCache.begin();
     for (auto it = std::next(g_metricCache.begin()); it != g_metricCache.end(); ++it)
@@ -869,14 +932,15 @@ static void glassPanel(int x,int y,int width,int height) {
 
 static void drawText(TTF_Font*f,int x,int y,const char*s,SDL_Color c){
   if(!f||!s||!*s) return;
-  TextKey key{f,packColor(c),s};
-  auto found=g_textCache.find(key);
+  TextKeyView key_view{f,packColor(c),s};
+  auto found=g_textCache.find(key_view);
   if(found!=g_textCache.end()){
     found->second.use=++g_textUseSerial;
     SDL_Rect d={x,y,found->second.width,found->second.height};
     SDL_RenderCopy(g_ren,found->second.texture,nullptr,&d);
     return;
   }
+  TextKey key{f,packColor(c),s};
   SDL_Surface*sf=TTF_RenderUTF8_Blended(f,s,c); if(!sf) return;
   SDL_Texture*t=SDL_CreateTextureFromSurface(g_ren,sf);
   int w=sf->w,h=sf->h; SDL_FreeSurface(sf);
@@ -895,16 +959,17 @@ static void drawText(TTF_Font*f,int x,int y,const char*s,SDL_Color c){
 }
 static int textW(TTF_Font*f,const char*s){
   if(!f||!s||!*s) return 0;
-  MetricKey key{f,s}; auto found=g_metricCache.find(key);
+  MetricKeyView key_view{f,s}; auto found=g_metricCache.find(key_view);
   if(found!=g_metricCache.end()){ found->second.use=++g_textUseSerial; return found->second.width; }
   int w=0,h=0; if(TTF_SizeUTF8(f,s,&w,&h)!=0) return 0;
   rememberTextMetric(f,s,w); return w;
 }
 
 static const std::string &ellipsizedText(TTF_Font *font, const std::string &text, int maxWidth) {
-  EllipsisKey key{font,maxWidth,text};
-  auto found=g_ellipsisCache.find(key);
+  EllipsisKeyView key_view{font,maxWidth,text};
+  auto found=g_ellipsisCache.find(key_view);
   if(found!=g_ellipsisCache.end()){ found->second.use=++g_textUseSerial; return found->second.text; }
+  EllipsisKey key{font,maxWidth,text};
 
   std::vector<size_t> boundaries{0};
   for(size_t i=0;i<text.size();){
