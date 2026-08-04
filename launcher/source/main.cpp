@@ -1541,9 +1541,10 @@ static void scanGames(const std::vector<std::string> &sourcePaths) {
     struct dirent *e;
     while ((e = readdir(d))) {
       if(e->d_name[0]=='.') continue;
+      if(!hasDiscExt(e->d_name)) continue; // ⚡ Bolt: Fast-path string check before expensive IO operation
       std::string full = join(source, e->d_name);
       struct stat sst{};
-      if (stat(full.c_str(), &sst) != 0 || !S_ISREG(sst.st_mode) || !hasDiscExt(e->d_name)) continue;
+      if (stat(full.c_str(), &sst) != 0 || !S_ISREG(sst.st_mode)) continue;
       if(!seenPaths.insert(pathIdentity(full)).second) continue;
       Game g;
       g.file = e->d_name;
