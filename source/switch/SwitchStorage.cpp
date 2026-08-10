@@ -21,6 +21,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <string_view>
 #include <unordered_map>
 
 namespace SwitchStorage
@@ -125,10 +126,11 @@ int fail(_reent* reent, int error)
 	return -1;
 }
 
-std::string trim(std::string value)
+// ⚡ Bolt: Using std::string_view instead of std::string to avoid unnecessary allocations and copies
+std::string_view trim(std::string_view value)
 {
 	const auto first = value.find_first_not_of(" \t\r\n");
-	if (first == std::string::npos)
+	if (first == std::string_view::npos)
 		return {};
 	const auto last = value.find_last_not_of(" \t\r\n");
 	return value.substr(first, last - first + 1);
@@ -657,15 +659,15 @@ std::unordered_map<std::string, std::string> readIni(const std::string& path)
 	char line[4096];
 	while (std::fgets(line, sizeof(line), file))
 	{
-		std::string text = trim(line);
+		std::string_view text = trim(line);
 		if (text.empty() || text.front() == '#' || text.front() == ';' || text.front() == '[')
 			continue;
 		const auto separator = text.find('=');
-		if (separator == std::string::npos)
+		if (separator == std::string_view::npos)
 			continue;
-		std::string key = trim(text.substr(0, separator));
+		std::string_view key = trim(text.substr(0, separator));
 		if (!key.empty())
-			values[key] = trim(text.substr(separator + 1));
+			values[std::string(key)] = std::string(trim(text.substr(separator + 1)));
 	}
 	std::fclose(file);
 	return values;
