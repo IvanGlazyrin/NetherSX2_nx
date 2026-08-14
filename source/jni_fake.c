@@ -361,19 +361,27 @@ static void stringlist_add(const char *key, const char *val, int add) {
   const char *cur = prefs_get_string(key, "");
   // rebuild without `val`, optionally re-appending it
   size_t cap = strlen(cur) + strlen(val) + 4;
-  char *out = calloc(cap, 1);
+
+  // ⚡ Bolt: O(n) string concatenation using pointer tracking + memcpy
+  char *out = malloc(cap);
+  char *out_p = out;
   char *tmp = strdup(cur);
   char *save = NULL;
   for (char *tok = strtok_r(tmp, "\n", &save); tok; tok = strtok_r(NULL, "\n", &save)) {
     if (!strcmp(tok, val))
       continue; // drop existing copy (dedupe / remove)
-    if (out[0]) strncat(out, "\n", cap - strlen(out) - 1);
-    strncat(out, tok, cap - strlen(out) - 1);
+    if (out_p != out) *out_p++ = '\n';
+    size_t tok_len = strlen(tok);
+    memcpy(out_p, tok, tok_len);
+    out_p += tok_len;
   }
   if (add) {
-    if (out[0]) strncat(out, "\n", cap - strlen(out) - 1);
-    strncat(out, val, cap - strlen(out) - 1);
+    if (out_p != out) *out_p++ = '\n';
+    size_t val_len = strlen(val);
+    memcpy(out_p, val, val_len);
+    out_p += val_len;
   }
+  *out_p = '\0';
   prefs_set_string(key, out);
   free(tmp);
   free(out);
@@ -782,11 +790,18 @@ static void dispatch_void(const char *name, va_list va) {
     size_t cap = 1;
     for (int i = 0; i < n; i++)
       cap += strlen(obj_str(jni_obj_array_get(jarr, i))) + 1;
-    char *out = calloc(cap, 1);
+
+    // ⚡ Bolt: O(n) string concatenation using pointer tracking + memcpy
+    char *out = malloc(cap);
+    char *out_p = out;
     for (int i = 0; i < n; i++) {
-      if (i) strncat(out, "\n", cap - strlen(out) - 1);
-      strncat(out, obj_str(jni_obj_array_get(jarr, i)), cap - strlen(out) - 1);
+      if (i) *out_p++ = '\n';
+      const char *s = obj_str(jni_obj_array_get(jarr, i));
+      size_t s_len = strlen(s);
+      memcpy(out_p, s, s_len);
+      out_p += s_len;
     }
+    *out_p = '\0';
     prefs_set_string(obj_str(jkey), out);
     free(out);
     return;
