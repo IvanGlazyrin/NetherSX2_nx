@@ -64,11 +64,14 @@ static Store g_titles;
 static Store *g_active = &g_global;
 static const char *TITLES_INI = "sdmc:/switch/nethersx2/titles.ini";
 
-static std::string trim(const std::string &s) {
+// ⚡ Bolt: taking std::string_view instead of const std::string&
+// Avoids implicit std::string allocations when called with substrings (like s.substr())
+// Performance impact: Reduces memory allocations during parsing loops (e.g. config parsing).
+static std::string trim(std::string_view s) {
   size_t a = s.find_first_not_of(" \t\r\n");
-  if (a == std::string::npos) return "";
+  if (a == std::string_view::npos) return "";
   size_t b = s.find_last_not_of(" \t\r\n");
-  return s.substr(a, b - a + 1);
+  return std::string(s.substr(a, b - a + 1));
 }
 static const char *storeGet(Store &s, const char *key, const char *def) {
   for (auto &e : s.kv) if (e.k == key) return e.v.c_str();
