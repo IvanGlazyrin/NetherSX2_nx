@@ -52,7 +52,10 @@ struct ParsedFile {
   std::vector<size_t> visible_groups;
 };
 
-size_t skip_space(const std::string &value, size_t offset = 0) {
+// ⚡ Bolt: taking std::string_view instead of const std::string&
+// Avoids memory allocations and string copying when parsing cheat files
+// Performance impact: Speeds up line-by-line parsing operations inside cheat processing loops
+size_t skip_space(std::string_view value, size_t offset = 0) {
   if (offset == 0 && value.size() >= 3 &&
       static_cast<unsigned char>(value[0]) == 0xef &&
       static_cast<unsigned char>(value[1]) == 0xbb &&
@@ -64,12 +67,12 @@ size_t skip_space(const std::string &value, size_t offset = 0) {
   return offset;
 }
 
-std::string trim_copy(const std::string &value) {
+std::string trim_copy(std::string_view value) {
   size_t first = skip_space(value);
   size_t last = value.size();
   while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])))
     last--;
-  return value.substr(first, last - first);
+  return std::string(value.substr(first, last - first));
 }
 
 bool starts_with_ci(const std::string &value, size_t offset, const char *prefix) {

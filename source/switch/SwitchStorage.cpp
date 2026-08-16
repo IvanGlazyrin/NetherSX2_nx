@@ -125,13 +125,16 @@ int fail(_reent* reent, int error)
 	return -1;
 }
 
-std::string trim(std::string value)
+// ⚡ Bolt: taking std::string_view instead of std::string by value
+// Avoids implicit std::string allocations when called with substrings (like text.substr(0, separator))
+// Performance impact: Reduces memory allocations during SMB INI parsing loops.
+std::string trim(std::string_view value)
 {
 	const auto first = value.find_first_not_of(" \t\r\n");
-	if (first == std::string::npos)
+	if (first == std::string_view::npos)
 		return {};
 	const auto last = value.find_last_not_of(" \t\r\n");
-	return value.substr(first, last - first + 1);
+	return std::string(value.substr(first, last - first + 1));
 }
 
 bool validId(const std::string& id)
