@@ -1267,6 +1267,12 @@ static const std::string &ellipsizedText(TTF_Font *font, const std::string &text
   auto found=g_ellipsisCache.find(key);
   if(found!=g_ellipsisCache.end()){ found->second.use=++g_textUseSerial; return found->second.text; }
 
+  // BOLT: Fast-path for text that already fits. Bypasses the binary search and dynamic string allocations.
+  if (textW(font, text.c_str()) <= maxWidth) {
+    auto inserted = g_ellipsisCache.emplace(std::move(key), EllipsisEntry{text, ++g_textUseSerial});
+    return inserted.first->second.text;
+  }
+
   std::vector<size_t> boundaries{0};
   for(size_t i=0;i<text.size();){
     const unsigned char lead=(unsigned char)text[i];
@@ -1907,7 +1913,8 @@ static void scanGames(const std::vector<std::string> &sourcePaths) {
       if(e->d_name[0]=='.') continue;
       std::string full = join(source, e->d_name);
       struct stat sst{};
-      if (stat(full.c_str(), &sst) != 0 || !S_ISREG(sst.st_mode) || !hasDiscExt(e->d_name)) continue;
+      // BOLT: Optimize I/O overhead by doing the fast string-based check (hasDiscExt) BEFORE the slow stat() syscall
+      if (!hasDiscExt(e->d_name) || stat(full.c_str(), &sst) != 0 || !S_ISREG(sst.st_mode)) continue;
       if(!seenPaths.insert(pathIdentity(full)).second) continue;
       Game g;
       g.file = e->d_name;
