@@ -1707,6 +1707,10 @@ static void update_gamepads(void) {
     const HidAnalogStickState ls = padGetStickPos(pad, 0);
     const HidAnalogStickState rs = padGetStickPos(pad, 1);
     const bool sticks_changed = pad_sticks_changed(player, ls, rs);
+    if (!changed && !sticks_changed) {
+      g_pad_previous[player] = down;
+      continue;
+    }
     if (nl.setPadValue) {
       for (int i = 0; i < config->bind_count; i++) {
         if (!(changed & config->binds[i].hid)) continue;
