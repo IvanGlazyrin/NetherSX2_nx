@@ -1,0 +1,3 @@
+## 2024-05-19 - Fast string trimming
+**Learning:** `std::string::find_first_not_of` and `find_last_not_of` are much slower than manually checking characters in a loop, particularly when the set of characters to check against is small and known at compile time (like whitespace). They introduce overhead by iterating over the lookup string characters or maintaining string views internally. Additionally, bypassing `std::string::substr` when no trimming is needed avoids heap allocation overhead entirely.
+**Action:** When trimming or scanning characters matching a small fixed set, manual loops with direct index or pointer access and branching logic (like `||`) provide significantly better performance (~2-3x speedup).

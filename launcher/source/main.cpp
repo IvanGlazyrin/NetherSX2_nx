@@ -84,9 +84,24 @@ static const char* tr(const char* source)
 }
 
 static std::string trim(const std::string &s) {
-  size_t a = s.find_first_not_of(" \t\r\n");
-  if (a == std::string::npos) return "";
-  size_t b = s.find_last_not_of(" \t\r\n");
+  const char* str = s.c_str();
+  size_t len = s.length();
+  size_t a = 0;
+
+  // Manual character checking is faster than find_first_not_of which uses a string view overhead.
+  // Optimizes parsing configurations and library queries where trim is called heavily.
+  while (a < len && (str[a] == ' ' || str[a] == '\t' || str[a] == '\r' || str[a] == '\n')) {
+      a++;
+  }
+
+  if (a == len) return "";
+
+  size_t b = len - 1;
+  while (b > a && (str[b] == ' ' || str[b] == '\t' || str[b] == '\r' || str[b] == '\n')) {
+      b--;
+  }
+
+  if (a == 0 && b == len - 1) return s; // Avoid allocation when no trim is needed
   return s.substr(a, b - a + 1);
 }
 static void ensureStoreIndex(const Store &s) {
