@@ -1,0 +1,3 @@
+## 2024-08-22 - [Optimize Trim Function string searches]
+**Learning:** In performance-critical paths (e.g., frequent config parsing loops), standard library string search functions like `std::string::find_first_not_of` incur noticeable overhead. Using manual loops with direct index/pointer evaluation for small sets of target characters (like whitespace) combined with bypassing `.substr()` when unmodified offers significant performance benefits.
+**Action:** Replace `find_first_not_of` and `find_last_not_of` with manual loops when searching for a small set of characters and bypass `substr` when the string does not need trimming.

@@ -182,10 +182,22 @@ bool ValidId(const std::string& id)
 
 std::string Trim(std::string value)
 {
-  const auto first = value.find_first_not_of(" \t\r\n");
-  if (first == std::string::npos)
+  // Bolt Optimization: Replace find_first_not_of/find_last_not_of with manual loops
+  // and bypass .substr() when unmodified for better string trim performance.
+  std::size_t first = 0;
+  while (first < value.size() && (value[first] == ' ' || value[first] == '\t' || value[first] == '\r' || value[first] == '\n'))
+    ++first;
+
+  if (first == value.size())
     return {};
-  const auto last = value.find_last_not_of(" \t\r\n");
+
+  std::size_t last = value.size() - 1;
+  while (last > first && (value[last] == ' ' || value[last] == '\t' || value[last] == '\r' || value[last] == '\n'))
+    --last;
+
+  if (first == 0 && last == value.size() - 1)
+    return value;
+
   return value.substr(first, last - first + 1);
 }
 
