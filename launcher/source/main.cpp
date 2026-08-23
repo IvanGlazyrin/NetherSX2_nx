@@ -84,9 +84,15 @@ static const char* tr(const char* source)
 }
 
 static std::string trim(const std::string &s) {
-  size_t a = s.find_first_not_of(" \t\r\n");
-  if (a == std::string::npos) return "";
-  size_t b = s.find_last_not_of(" \t\r\n");
+  size_t a = 0;
+  while (a < s.size() && (s[a] == ' ' || s[a] == '\t' || s[a] == '\r' || s[a] == '\n'))
+    a++;
+  if (a == s.size()) return "";
+  size_t b = s.size() - 1;
+  while (b > a && (s[b] == ' ' || s[b] == '\t' || s[b] == '\r' || s[b] == '\n'))
+    b--;
+  if (a == 0 && b == s.size() - 1)
+    return s;
   return s.substr(a, b - a + 1);
 }
 static void ensureStoreIndex(const Store &s) {
