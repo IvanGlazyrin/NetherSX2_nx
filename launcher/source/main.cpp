@@ -83,10 +83,12 @@ static const char* tr(const char* source)
   return source ? g_localization.Translate(source).data() : "";
 }
 
+// ⚡ Bolt: Added fast path to skip substr() allocation when the string is already trimmed
 static std::string trim(const std::string &s) {
   size_t a = s.find_first_not_of(" \t\r\n");
   if (a == std::string::npos) return "";
   size_t b = s.find_last_not_of(" \t\r\n");
+  if (a == 0 && b == s.size() - 1) return s;
   return s.substr(a, b - a + 1);
 }
 static void ensureStoreIndex(const Store &s) {
