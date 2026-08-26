@@ -58,18 +58,23 @@ size_t skip_space(const std::string &value, size_t offset = 0) {
       static_cast<unsigned char>(value[1]) == 0xbb &&
       static_cast<unsigned char>(value[2]) == 0xbf)
     offset = 3;
-  while (offset < value.size() &&
-         std::isspace(static_cast<unsigned char>(value[offset])))
-    offset++;
-  return offset;
+  // Optimize: use std::string::find_first_not_of for idiomatic string traversal
+  size_t next = value.find_first_not_of(" \t\n\r\v\f", offset);
+  return next == std::string::npos ? value.size() : next;
 }
 
 std::string trim_copy(const std::string &value) {
   size_t first = skip_space(value);
-  size_t last = value.size();
-  while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])))
-    last--;
-  return value.substr(first, last - first);
+  if (first >= value.size()) return "";
+
+  // Optimize: use std::string::find_last_not_of for idiomatic string traversal
+  size_t last = value.find_last_not_of(" \t\n\r\v\f");
+
+  // Fast path: avoid allocating a new std::string via substr if the string is already trimmed,
+  // which is often the case during large config file parsing.
+  if (first == 0 && last == value.size() - 1) return value;
+
+  return value.substr(first, last - first + 1);
 }
 
 bool starts_with_ci(const std::string &value, size_t offset, const char *prefix) {
