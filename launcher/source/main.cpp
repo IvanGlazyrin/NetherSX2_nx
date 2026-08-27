@@ -7007,7 +7007,7 @@ int main(int argc, char **argv){
       storeRemove(effective,"EmuCore/GS/DisableThreadedPresentation");
     } else {
       storeSet(effective,"EmuCore/GS/DisableThreadedPresentation",
-               disableThreadedPresentation?"true":"false");
+               disableThreadedPresentation?"false":"true");
       storeRemove(effective,"EmuCore/GS/ThreadedPresentation");
     }
     appletSetCpuBoostMode(ApmCpuBoostMode_FastLoad);

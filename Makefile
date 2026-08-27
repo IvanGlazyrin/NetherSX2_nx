@@ -24,7 +24,7 @@ INCLUDES	:=	source source/switch \
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
-ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
+ARCH	:=	-mcpu=cortex-a57+crypto+crc+simd -mtune=cortex-a57 -mtp=soft -fPIE
 LTOFLAGS := -flto=auto -fuse-linker-plugin
 
 # __SWITCH__ for libnx; NETHERSX2 gates the port-specific shim branches.
@@ -58,7 +58,7 @@ else
 DEFINES	+=	-DGS_RENDERER=12
 endif
 
-CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) \
+CFLAGS	:=	-g -Wall -Ofast --param l1-cache-size=32 --param l2-cache-size=2048 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) \
 			$(ARCH) $(DEFINES)
 CFLAGS	+=	$(INCLUDE)
 CXXFLAGS	:= $(CFLAGS) -std=gnu++20
