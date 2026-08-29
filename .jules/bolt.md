@@ -1,0 +1,3 @@
+## 2024-05-24 - Avoid unnecessary string allocations when trimming strings
+**Learning:** `std::string::substr()` typically allocates memory for a new string, even if it returns the full original string length. When an input parameter is passed by value (like `std::string value`), taking advantage of move semantics by conditionally checking if any modification is needed and returning the original parameter directly can significantly speed up paths that deal with already-validated or formatted data.
+**Action:** When working on formatting/sanitization functions (like Trim, uppercase/lowercase), add a fast-path condition that returns the original object early if no change is needed, preventing heap allocations.

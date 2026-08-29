@@ -186,6 +186,9 @@ std::string Trim(std::string value)
   if (first == std::string::npos)
     return {};
   const auto last = value.find_last_not_of(" \t\r\n");
+  // ⚡ Bolt: Fast-path return for already trimmed strings to avoid unnecessary substr() heap allocations
+  if (first == 0 && last == value.size() - 1)
+    return value;
   return value.substr(first, last - first + 1);
 }
 
