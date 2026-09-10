@@ -161,6 +161,14 @@ static int hex_digit(char value) {
 
 static bool parse_json_string(const std::string &json, size_t position, std::string &output) {
   if (position >= json.size() || json[position] != '"') return false;
+
+  // ⚡ Bolt: Fast path for simple strings without escape sequences avoids character-by-character string append operations
+  size_t end_char = json.find_first_of("\"\\", position + 1);
+  if (end_char != std::string::npos && json[end_char] == '"') {
+    output = json.substr(position + 1, end_char - position - 1);
+    return true;
+  }
+
   std::string parsed;
   for (size_t index = position + 1; index < json.size(); ++index) {
     unsigned char value = (unsigned char)json[index];

@@ -1,0 +1,3 @@
+## 2024-09-10 - Bounding String Searches
+**Learning:** When attempting to optimize JSON string parsing in C++, using `json.find('\\', position + 1)` without an upper bound is a fatal mistake. Because the search space spans the entire rest of the JSON document, it transforms an O(N) parser into an O(N^2) bottleneck for documents lacking escape characters.
+**Action:** When searching for substrings within a delimited token, always use `std::string::find_first_of` (e.g., `find_first_of("\"\\")`) to simultaneously bound the search to the current token and check for necessary conditions (like an escape character).
