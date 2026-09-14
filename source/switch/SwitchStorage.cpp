@@ -180,10 +180,10 @@ bool ValidId(const std::string& id)
   });
 }
 
-std::string Trim(std::string value)
+std::string_view Trim(std::string_view value)
 {
   const auto first = value.find_first_not_of(" \t\r\n");
-  if (first == std::string::npos)
+  if (first == std::string_view::npos)
     return {};
   const auto last = value.find_last_not_of(" \t\r\n");
   return value.substr(first, last - first + 1);
@@ -198,15 +198,15 @@ std::unordered_map<std::string, std::string> ReadIni(const std::string& path)
   char line[4096];
   while (std::fgets(line, sizeof(line), file))
   {
-    std::string text = Trim(line);
+    std::string_view text = Trim(line);
     if (text.empty() || text.front() == '#' || text.front() == ';' || text.front() == '[')
       continue;
     const auto separator = text.find('=');
-    if (separator == std::string::npos)
+    if (separator == std::string_view::npos)
       continue;
-    std::string key = Trim(text.substr(0, separator));
+    std::string key = std::string(Trim(text.substr(0, separator)));
     if (!key.empty())
-      values[std::move(key)] = Trim(text.substr(separator + 1));
+      values[std::move(key)] = std::string(Trim(text.substr(separator + 1)));
   }
   std::fclose(file);
   return values;
