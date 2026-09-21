@@ -233,23 +233,30 @@ namespace
 		const std::size_t array = json.find('[', fieldPosition);
 		if (array == std::string::npos)
 			return objects;
+		const char* c_str = json.c_str();
+		std::size_t size = json.size();
 		bool quoted = false;
-		bool escaped = false;
 		int depth = 0;
 		std::size_t start = std::string::npos;
-		for (std::size_t index = array + 1; index < json.size(); ++index)
+		for (std::size_t index = array + 1; index < size; ++index)
 		{
-			const char value = json[index];
 			if (quoted)
 			{
-				if (escaped)
-					escaped = false;
-				else if (value == '\\')
-					escaped = true;
-				else if (value == '"')
-					quoted = false;
+				while (index < size)
+				{
+					char c = c_str[index];
+					if (c == '\\')
+						index += 1;
+					else if (c == '"')
+					{
+						quoted = false;
+						break;
+					}
+					index++;
+				}
 				continue;
 			}
+			const char value = c_str[index];
 			if (value == '"')
 			{
 				quoted = true;
@@ -264,7 +271,7 @@ namespace
 			{
 				if (--depth == 0 && start != std::string::npos)
 				{
-					objects.emplace_back(json.substr(start, index - start + 1));
+					objects.emplace_back(json, start, index - start + 1);
 					start = std::string::npos;
 				}
 			}
