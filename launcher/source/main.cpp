@@ -5835,7 +5835,10 @@ static std::vector<std::string> wrapReleaseNotes(const std::string &notes,int ma
         size_t split=boundaries[low];
         size_t space=paragraph.rfind(' ',split);
         if(space!=std::string::npos&&space>0&&space>=split/3) split=space;
-        lines.push_back(prefix+paragraph.substr(0,split));
+        // Bolt: Avoid temporary substring allocation and string concatenation object
+        // by pushing the prefix first and then appending the paragraph string in-place.
+        lines.push_back(prefix);
+        lines.back().append(paragraph, 0, split);
         paragraph.erase(0,split);
         continuation=true;
       }

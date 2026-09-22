@@ -224,7 +224,9 @@ static std::vector<std::string> json_data_objects(const std::string &json) {
       if (depth++ == 0) start = index;
     } else if (value == '}' && depth > 0) {
       if (--depth == 0 && start != std::string::npos) {
-        objects.emplace_back(json.substr(start, index - start + 1));
+        // Bolt: Use emplace_back with string, pos, count to construct the string directly
+        // in the vector without allocating a temporary substring object.
+        objects.emplace_back(json, start, index - start + 1);
         start = std::string::npos;
       }
     } else if (value == ']' && depth == 0) break;

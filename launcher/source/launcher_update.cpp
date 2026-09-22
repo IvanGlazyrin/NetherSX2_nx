@@ -264,7 +264,9 @@ namespace
 			{
 				if (--depth == 0 && start != std::string::npos)
 				{
-					objects.emplace_back(json.substr(start, index - start + 1));
+						// Bolt: Use emplace_back with string, pos, count to construct the string directly
+						// in the vector without allocating a temporary substring object.
+						objects.emplace_back(json, start, index - start + 1);
 					start = std::string::npos;
 				}
 			}
