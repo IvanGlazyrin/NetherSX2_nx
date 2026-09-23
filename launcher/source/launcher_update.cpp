@@ -264,7 +264,7 @@ namespace
 			{
 				if (--depth == 0 && start != std::string::npos)
 				{
-					objects.emplace_back(json.substr(start, index - start + 1));
+					objects.emplace_back(json, start, index - start + 1);
 					start = std::string::npos;
 				}
 			}
