@@ -1565,10 +1565,12 @@ static const std::string &ellipsizedText(TTF_Font *font, const std::string &text
   size_t low=0,high=boundaries.size()-1;
   while(low<high){
     size_t middle=(low+high+1)/2;
-    std::string candidate=text.substr(0,boundaries[middle])+"...";
+    std::string candidate(text, 0, boundaries[middle]);
+    candidate.append("...");
     if(textW(font,candidate.c_str())<=maxWidth) low=middle; else high=middle-1;
   }
-  std::string shortened=text.substr(0,boundaries[low])+"...";
+  std::string shortened(text, 0, boundaries[low]);
+  shortened.append("...");
   if(g_ellipsisCache.size()>=ELLIPSIS_CACHE_LIMIT){
     auto victim=g_ellipsisCache.begin();
     for(auto it=std::next(g_ellipsisCache.begin());it!=g_ellipsisCache.end();++it)
@@ -1865,14 +1867,22 @@ static void drawSettingsFooter(const char *text,int cy=-1){
   const std::string source=text;
   size_t cursor=0;
   while(cursor<source.size()){
-    while(cursor<source.size()&&source[cursor]==' ') cursor++;
-    if(cursor>=source.size()) break;
-    size_t end=cursor;
-    while(end<source.size()&&!(source[end]==' '&&end+1<source.size()&&source[end+1]==' ')) end++;
-    std::string token=trim(source.substr(cursor,end-cursor));
-    if(!token.empty()) tokens.push_back(std::move(token));
-    cursor=end;
-    while(cursor<source.size()&&source[cursor]==' ') cursor++;
+    size_t next = source.find("  ", cursor);
+    if(next == std::string::npos) {
+        size_t a = source.find_first_not_of(" \t\r\n", cursor);
+        if(a != std::string::npos) {
+            size_t b = source.find_last_not_of(" \t\r\n");
+            tokens.emplace_back(source, a, b - a + 1);
+        }
+        break;
+    }
+    size_t a = source.find_first_not_of(" \t\r\n", cursor);
+    if(a != std::string::npos && a < next) {
+        size_t b = source.find_last_not_of(" \t\r\n", next - 1);
+        tokens.emplace_back(source, a, b - a + 1);
+    }
+    cursor = source.find_first_not_of(' ', next);
+    if(cursor == std::string::npos) break;
   }
   std::vector<FootItem> hints;
   hints.reserve(tokens.size()/2);
@@ -5829,13 +5839,16 @@ static std::vector<std::string> wrapReleaseNotes(const std::string &notes,int ma
         size_t low=1,high=boundaries.size()-1;
         while(low<high){
           size_t middle=(low+high+1)/2;
-          if(textW(g_font_sm,(prefix+paragraph.substr(0,boundaries[middle])).c_str())<=maxWidth) low=middle;
+          std::string candidate(prefix);
+          candidate.append(paragraph, 0, boundaries[middle]);
+          if(textW(g_font_sm,candidate.c_str())<=maxWidth) low=middle;
           else high=middle-1;
         }
         size_t split=boundaries[low];
         size_t space=paragraph.rfind(' ',split);
         if(space!=std::string::npos&&space>0&&space>=split/3) split=space;
-        lines.push_back(prefix+paragraph.substr(0,split));
+        lines.push_back(prefix);
+        lines.back().append(paragraph, 0, split);
         paragraph.erase(0,split);
         continuation=true;
       }
