@@ -1,0 +1,3 @@
+## 2024-03-24 - Avoid Hallucinating C++ Mocks During Syntax Checks
+**Learning:** When creating dummy headers to satisfy static syntax checks (g++ -fsyntax-only), guessing or hallucinating complex struct definitions (like `devoptab_t`) or function signatures that weren't explicitly reported as missing by the compiler violates the Groundedness Rule and leads to plan rejection.
+**Action:** When mocking dependencies for syntax verification, wait for the compiler to explicitly report a missing type (e.g., "error: 'UsbHsFsDevice' does not name a type"), and then mock only that exact, minimal type (`struct UsbHsFsDevice {};`) to allow the check to pass over the targeted logic changes without over-engineering the mock environment.
