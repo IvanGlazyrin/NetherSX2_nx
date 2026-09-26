@@ -1,0 +1,3 @@
+## 2024-05-24 - String_view for C++ parsing performance
+**Learning:** In C++17/20, using `std::string_view` for read-only string operations, specifically skipping `std::string` copies in trimming and scanning routines like `skip_space` and `trim_copy`, can prevent redundant memory allocations and drastically speed up string parsing loops without complicating code architecture.
+**Action:** Replace `const std::string &` with `std::string_view` for string parsing arguments in tight string analysis logic, and implement `trim_view` returning `std::string_view` instead of `trim_copy` returning `std::string`.
