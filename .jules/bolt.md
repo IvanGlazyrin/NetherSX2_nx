@@ -1,0 +1,3 @@
+## 2024-09-28 - Efficient File Parsing with std::string_view
+**Learning:** During extensive parsing of cheat files line-by-line, passing and returning intermediate text slices as `std::string` causes numerous unnecessary heap allocations. Using `std::string_view` allows zero-allocation substrings and zero-allocation string matching (e.g., prefix checking).
+**Action:** When implementing parsing functions for configuration or text files in modern C++ (C++17/20), always use `std::string_view` for arguments representing string slices and for transient return values to eliminate intermediate heap allocations. Materialize a `std::string` only when ownership or persistence is required.
