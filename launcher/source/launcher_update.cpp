@@ -119,23 +119,26 @@ namespace
 		if (position >= json.size() || json[position] != '"')
 			return false;
 		std::string parsed;
-		for (std::size_t index = position + 1; index < json.size(); ++index)
+		const char* str = json.c_str();
+		const std::size_t len = json.size();
+		parsed.reserve(64);
+		for (std::size_t index = position + 1; index < len; ++index)
 		{
-			const unsigned char value = static_cast<unsigned char>(json[index]);
-			if (value == '"')
+			std::size_t next_special = json.find_first_of("\"\\", index);
+			if (next_special == std::string::npos)
+				return false;
+			if (next_special > index) {
+				parsed.append(str + index, next_special - index);
+				index = next_special;
+			}
+			if (str[index] == '"')
 			{
 				output.swap(parsed);
 				return true;
 			}
-			if (value != '\\')
-			{
-				if (value != 0)
-					parsed += static_cast<char>(value);
-				continue;
-			}
-			if (++index >= json.size())
+			if (++index >= len)
 				return false;
-			const char escaped = json[index];
+			const char escaped = str[index];
 			if (escaped == '"' || escaped == '\\' || escaped == '/')
 				parsed += escaped;
 			else if (escaped == 'b')
@@ -264,7 +267,7 @@ namespace
 			{
 				if (--depth == 0 && start != std::string::npos)
 				{
-					objects.emplace_back(json.substr(start, index - start + 1));
+					objects.emplace_back(json, start, index - start + 1);
 					start = std::string::npos;
 				}
 			}

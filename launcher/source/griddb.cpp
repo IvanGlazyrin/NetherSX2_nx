@@ -162,12 +162,19 @@ static int hex_digit(char value) {
 static bool parse_json_string(const std::string &json, size_t position, std::string &output) {
   if (position >= json.size() || json[position] != '"') return false;
   std::string parsed;
-  for (size_t index = position + 1; index < json.size(); ++index) {
-    unsigned char value = (unsigned char)json[index];
-    if (value == '"') { output.swap(parsed); return true; }
-    if (value != '\\') { parsed += (char)value; continue; }
-    if (++index >= json.size()) return false;
-    char escaped = json[index];
+  const char* str = json.c_str();
+  const size_t len = json.size();
+  parsed.reserve(64);
+  for (size_t index = position + 1; index < len; ++index) {
+    size_t next_special = json.find_first_of("\"\\", index);
+    if (next_special == std::string::npos) return false;
+    if (next_special > index) {
+      parsed.append(str + index, next_special - index);
+      index = next_special;
+    }
+    if (str[index] == '"') { output.swap(parsed); return true; }
+    if (++index >= len) return false;
+    char escaped = str[index];
     if (escaped == '"' || escaped == '\\' || escaped == '/') parsed += escaped;
     else if (escaped == 'b') parsed += '\b';
     else if (escaped == 'f') parsed += '\f';
@@ -224,7 +231,7 @@ static std::vector<std::string> json_data_objects(const std::string &json) {
       if (depth++ == 0) start = index;
     } else if (value == '}' && depth > 0) {
       if (--depth == 0 && start != std::string::npos) {
-        objects.emplace_back(json.substr(start, index - start + 1));
+        objects.emplace_back(json, start, index - start + 1);
         start = std::string::npos;
       }
     } else if (value == ']' && depth == 0) break;
