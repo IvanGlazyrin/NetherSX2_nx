@@ -619,7 +619,7 @@ FILE *fopen_fake(const char *path, const char *mode) {
   if (f && strchr(mode, 'r')) {
     const char *ext = strrchr(p, '.');
     if (ext && strcasecmp(ext, ".dat") == 0)
-      setvbuf(f, NULL, _IOFBF, 256 * 1024);
+      setvbuf(f, NULL, _IOFBF, 2 * 1024 * 1024);
   }
   return f;
 }
