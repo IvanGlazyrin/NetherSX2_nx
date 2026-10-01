@@ -208,23 +208,32 @@ static std::vector<std::string> json_data_objects(const std::string &json) {
   if (data == std::string::npos) return objects;
   size_t array = json.find('[', data + 6);
   if (array == std::string::npos) return objects;
-  bool quoted = false, escaped = false;
+  const char* c_str = json.c_str();
+  size_t size = json.size();
+  bool quoted = false;
   int depth = 0;
   size_t start = std::string::npos;
-  for (size_t index = array + 1; index < json.size(); ++index) {
-    char value = json[index];
+  for (size_t index = array + 1; index < size; ++index) {
     if (quoted) {
-      if (escaped) escaped = false;
-      else if (value == '\\') escaped = true;
-      else if (value == '"') quoted = false;
+      while (index < size) {
+        char c = c_str[index];
+        if (c == '\\') {
+          index += 1;
+        } else if (c == '"') {
+          quoted = false;
+          break;
+        }
+        index++;
+      }
       continue;
     }
+    char value = c_str[index];
     if (value == '"') { quoted = true; continue; }
     if (value == '{') {
       if (depth++ == 0) start = index;
     } else if (value == '}' && depth > 0) {
       if (--depth == 0 && start != std::string::npos) {
-        objects.emplace_back(json.substr(start, index - start + 1));
+        objects.emplace_back(json, start, index - start + 1);
         start = std::string::npos;
       }
     } else if (value == ']' && depth == 0) break;
