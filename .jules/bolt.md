@@ -1,0 +1,3 @@
+## 2024-05-19 - Avoid O(N^2) strncat string building
+**Learning:** `strncat` within loops performs poorly because it iterates the destination string from the beginning on every invocation. Combining this with `strlen` to calculate remaining capacity on each iteration exacerbates the O(N^2) behavior, especially for potentially unbounded input sizes like INI serialization strings or RetroAchievements data structures.
+**Action:** For iterative string building in C code (e.g. `source/jni_fake.c`), manually track the end offset (`out_len`) and append chunks directly using `memcpy`, running in O(N) instead.
