@@ -69,6 +69,7 @@ std::string trim_copy(const std::string &value) {
   size_t last = value.size();
   while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])))
     last--;
+  if (first == 0 && last == value.size()) return value;
   return value.substr(first, last - first);
 }
 
