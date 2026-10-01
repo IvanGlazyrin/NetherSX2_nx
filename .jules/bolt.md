@@ -1,0 +1,3 @@
+## 2024-08-28 - Fast-path return for string operations
+**Learning:** Returning a string by value (`std::string`) from a function taking `const std::string&` invokes the copy constructor (or SSO). While adding `if (a == 0 && b == s.size() - 1) return s;` avoids the overhead of `.substr()`, it doesn't strictly prevent a copy allocation if the string length exceeds SSO limits. RVO applies to `.substr()` anyway. However, bypassing the `.substr()` invocation still constitutes a valid micro-optimization.
+**Action:** Be precise in terminology: describe optimizations like fast-path returns as "avoiding function overhead/internal boundary checks" rather than strictly "avoiding allocation" when returning by value.
