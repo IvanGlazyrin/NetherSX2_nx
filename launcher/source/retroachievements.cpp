@@ -55,6 +55,14 @@ void appendUtf8(std::string &output, unsigned codepoint) {
 bool parseJsonString(const std::string &json, std::size_t position,
                      std::string &output) {
   if (position >= json.size() || json[position] != '"') return false;
+
+  // ⚡ Bolt: Fast path for simple strings without escape sequences avoids character-by-character string append operations
+  std::size_t end_char = json.find_first_of("\"\\", position + 1);
+  if (end_char != std::string::npos && json[end_char] == '"') {
+    output = json.substr(position + 1, end_char - position - 1);
+    return true;
+  }
+
   std::string parsed;
   for (std::size_t index = position + 1; index < json.size(); ++index) {
     const char value = json[index];
