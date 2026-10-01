@@ -1,0 +1,3 @@
+## 2024-09-17 - Optimize trim and substr operations
+**Learning:** Optimizing `trim` functions in C++ (like those returning `std::string` by value) by avoiding `substr` calls when a temporary string is allocated significantly improves performance. Specifically, calling `trim_copy(line.substr(offset))` creates a redundant temporary string that can be avoided by passing the `offset` directly to the `trim_copy` function or by using `std::string_view`.
+**Action:** When trimming strings with an offset, modify the trim function to accept the offset directly or use `std::string_view` to avoid allocating redundant temporary `std::string` objects.
