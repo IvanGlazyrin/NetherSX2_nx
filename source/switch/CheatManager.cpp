@@ -64,11 +64,12 @@ size_t skip_space(const std::string &value, size_t offset = 0) {
   return offset;
 }
 
-std::string trim_copy(const std::string &value) {
-  size_t first = skip_space(value);
+std::string trim_copy(const std::string &value, size_t offset = 0) {
+  size_t first = skip_space(value, offset);
   size_t last = value.size();
   while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])))
     last--;
+  if (first == 0 && last == value.size()) return value;
   return value.substr(first, last - first);
 }
 
@@ -135,7 +136,7 @@ bool comment_heading(const std::string &line, std::string *heading) {
     offset++;
   else
     return false;
-  std::string value = trim_copy(line.substr(offset));
+  std::string value = trim_copy(line, offset);
   if (value.empty() || starts_with_ci(value, 0, "patch=") ||
       starts_with_ci(value, 0, "[NetherSX2-nx disabled]"))
     return false;
