@@ -364,15 +364,26 @@ static void stringlist_add(const char *key, const char *val, int add) {
   char *out = calloc(cap, 1);
   char *tmp = strdup(cur);
   char *save = NULL;
+
+  // ⚡ Bolt: Track length to replace O(N^2) strncat/strlen inside loop with O(N) appends
+  size_t len = 0;
   for (char *tok = strtok_r(tmp, "\n", &save); tok; tok = strtok_r(NULL, "\n", &save)) {
     if (!strcmp(tok, val))
       continue; // drop existing copy (dedupe / remove)
-    if (out[0]) strncat(out, "\n", cap - strlen(out) - 1);
-    strncat(out, tok, cap - strlen(out) - 1);
+    if (len > 0) {
+      out[len++] = '\n';
+    }
+    size_t tok_len = strlen(tok);
+    memcpy(out + len, tok, tok_len + 1);
+    len += tok_len;
   }
   if (add) {
-    if (out[0]) strncat(out, "\n", cap - strlen(out) - 1);
-    strncat(out, val, cap - strlen(out) - 1);
+    if (len > 0) {
+      out[len++] = '\n';
+    }
+    size_t val_len = strlen(val);
+    memcpy(out + len, val, val_len + 1);
+    len += val_len;
   }
   prefs_set_string(key, out);
   free(tmp);
@@ -783,9 +794,17 @@ static void dispatch_void(const char *name, va_list va) {
     for (int i = 0; i < n; i++)
       cap += strlen(obj_str(jni_obj_array_get(jarr, i))) + 1;
     char *out = calloc(cap, 1);
+
+    // ⚡ Bolt: Track length to replace O(N^2) strncat/strlen inside loop with O(N) appends
+    size_t len = 0;
     for (int i = 0; i < n; i++) {
-      if (i) strncat(out, "\n", cap - strlen(out) - 1);
-      strncat(out, obj_str(jni_obj_array_get(jarr, i)), cap - strlen(out) - 1);
+      if (i) {
+        out[len++] = '\n';
+      }
+      const char *str = obj_str(jni_obj_array_get(jarr, i));
+      size_t str_len = strlen(str);
+      memcpy(out + len, str, str_len + 1);
+      len += str_len;
     }
     prefs_set_string(obj_str(jkey), out);
     free(out);

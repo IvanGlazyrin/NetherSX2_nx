@@ -1,0 +1,1 @@
+## 2026-08-09 - [O(N^2) String Building Anti-Pattern]\n**Learning:** [Repeated use of `strncat` and `strlen` inside loops for string construction is an O(N^2) bottleneck found in JNI shims.]\n**Action:** [Track string length manually and use O(N) `memcpy` for concatenating strings during JNI preference serialization.]\n
