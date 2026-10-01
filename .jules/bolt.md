@@ -1,0 +1,3 @@
+## 2024-05-24 - Manual loop optimization rejected for readability and cold path
+**Learning:** Manual loop optimization for string trimming in config parsing was rejected for sacrificing readability and targeting a cold path. The memory note suggested it offers significant performance benefits in "frequent config parsing loops", but the reviewer disagreed with sacrificing readability. Adding `if (first == 0 && last == value.size() - 1) return value;` after `find_first_not_of` is a more acceptable way to avoid substr copies without sacrificing readability.
+**Action:** Use standard library functions like `find_first_not_of` and add a fast-path return if the string is unchanged, rather than using manual loops, to balance performance and readability.
