@@ -52,7 +52,7 @@ struct ParsedFile {
   std::vector<size_t> visible_groups;
 };
 
-size_t skip_space(const std::string &value, size_t offset = 0) {
+size_t skip_space(std::string_view value, size_t offset = 0) {
   if (offset == 0 && value.size() >= 3 &&
       static_cast<unsigned char>(value[0]) == 0xef &&
       static_cast<unsigned char>(value[1]) == 0xbb &&
@@ -64,7 +64,7 @@ size_t skip_space(const std::string &value, size_t offset = 0) {
   return offset;
 }
 
-std::string trim_copy(const std::string &value) {
+std::string_view trim_copy(std::string_view value) {
   size_t first = skip_space(value);
   size_t last = value.size();
   while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])))
@@ -72,7 +72,7 @@ std::string trim_copy(const std::string &value) {
   return value.substr(first, last - first);
 }
 
-bool starts_with_ci(const std::string &value, size_t offset, const char *prefix) {
+bool starts_with_ci(std::string_view value, size_t offset, const char *prefix) {
   for (size_t index = 0; prefix[index]; index++) {
     if (offset + index >= value.size() ||
         std::tolower(static_cast<unsigned char>(value[offset + index])) !=
@@ -83,7 +83,7 @@ bool starts_with_ci(const std::string &value, size_t offset, const char *prefix)
 }
 
 std::string display_name(std::string name) {
-  name = trim_copy(name);
+  name = std::string(trim_copy(name));
   static const char *prefixes[] = {"cheats\\", "cheat\\", "patches\\", "patch\\"};
   for (const char *prefix : prefixes) {
     if (starts_with_ci(name, 0, prefix)) {
@@ -99,7 +99,7 @@ std::string display_name(std::string name) {
   return name;
 }
 
-bool find_patch(const std::string &line, size_t *patch_offset, PatchKind *kind) {
+bool find_patch(std::string_view line, size_t *patch_offset, PatchKind *kind) {
   size_t offset = skip_space(line);
   if (starts_with_ci(line, offset, "patch=")) {
     *patch_offset = offset;
@@ -127,7 +127,7 @@ bool find_patch(const std::string &line, size_t *patch_offset, PatchKind *kind) 
   return true;
 }
 
-bool comment_heading(const std::string &line, std::string *heading) {
+bool comment_heading(std::string_view line, std::string *heading) {
   size_t offset = skip_space(line);
   if (offset + 1 < line.size() && line[offset] == '/' && line[offset + 1] == '/')
     offset += 2;
@@ -135,7 +135,7 @@ bool comment_heading(const std::string &line, std::string *heading) {
     offset++;
   else
     return false;
-  std::string value = trim_copy(line.substr(offset));
+  std::string_view value = trim_copy(line.substr(offset));
   if (value.empty() || starts_with_ci(value, 0, "patch=") ||
       starts_with_ci(value, 0, "[NetherSX2-nx disabled]"))
     return false;
@@ -149,7 +149,7 @@ bool comment_heading(const std::string &line, std::string *heading) {
     }
   }
   if (all_code) return false;
-  *heading = display_name(value);
+  *heading = display_name(std::string(value));
   return true;
 }
 
@@ -194,9 +194,9 @@ bool parse_bytes(const std::string &contents, ParsedFile *parsed) {
   unsigned unnamed_index = 1;
 
   for (Line &line : parsed->lines) {
-    std::string trimmed = trim_copy(line.text);
+    std::string_view trimmed = trim_copy(line.text);
     if (trimmed.size() >= 3 && trimmed.front() == '[' && trimmed.back() == ']') {
-      section_group = add_group(parsed, trimmed.substr(1, trimmed.size() - 2), unnamed_index++);
+      section_group = add_group(parsed, std::string(trimmed.substr(1, trimmed.size() - 2)), unnamed_index++);
       legacy_group = -1;
       pending_heading.clear();
       legacy_break = true;
