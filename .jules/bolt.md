@@ -1,0 +1,3 @@
+## 2024-11-20 - Fast Path for String Truncation
+**Learning:** Found a function `ellipsizedText` that always performed an O(log N) binary search with expensive font measuring and O(N) boundary parsing, even when the text naturally fit the max width limit. It also blindly appended "..." to the text regardless of whether it fit. Caching the result prevents subsequent expensive calls, but the first cache miss was always unnecessarily expensive for the common case (text fitting).
+**Action:** Always check the bounds/fast path before entering expensive algorithms. Added an early check against `maxWidth` and refactored cache eviction code to avoid DRY violations.
