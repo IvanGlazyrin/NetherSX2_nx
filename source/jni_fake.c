@@ -361,19 +361,35 @@ static void stringlist_add(const char *key, const char *val, int add) {
   const char *cur = prefs_get_string(key, "");
   // rebuild without `val`, optionally re-appending it
   size_t cap = strlen(cur) + strlen(val) + 4;
-  char *out = calloc(cap, 1);
+  char *out = malloc(cap);
+  if (!out) return;
+  size_t out_len = 0;
   char *tmp = strdup(cur);
   char *save = NULL;
+
+  // Optimization: Track output length and use memcpy instead of repeated strncat/strlen
+  // This eliminates O(N^2) complexity (Shlemiel the Painter's algorithm)
   for (char *tok = strtok_r(tmp, "\n", &save); tok; tok = strtok_r(NULL, "\n", &save)) {
     if (!strcmp(tok, val))
       continue; // drop existing copy (dedupe / remove)
-    if (out[0]) strncat(out, "\n", cap - strlen(out) - 1);
-    strncat(out, tok, cap - strlen(out) - 1);
+
+    size_t tok_len = strlen(tok);
+    if (out_len > 0) {
+      out[out_len++] = '\n';
+    }
+    memcpy(out + out_len, tok, tok_len);
+    out_len += tok_len;
   }
   if (add) {
-    if (out[0]) strncat(out, "\n", cap - strlen(out) - 1);
-    strncat(out, val, cap - strlen(out) - 1);
+    size_t val_len = strlen(val);
+    if (out_len > 0) {
+      out[out_len++] = '\n';
+    }
+    memcpy(out + out_len, val, val_len);
+    out_len += val_len;
   }
+  out[out_len] = '\0';
+
   prefs_set_string(key, out);
   free(tmp);
   free(out);
@@ -782,13 +798,24 @@ static void dispatch_void(const char *name, va_list va) {
     size_t cap = 1;
     for (int i = 0; i < n; i++)
       cap += strlen(obj_str(jni_obj_array_get(jarr, i))) + 1;
-    char *out = calloc(cap, 1);
-    for (int i = 0; i < n; i++) {
-      if (i) strncat(out, "\n", cap - strlen(out) - 1);
-      strncat(out, obj_str(jni_obj_array_get(jarr, i)), cap - strlen(out) - 1);
+    char *out = malloc(cap);
+    if (out) {
+      size_t out_len = 0;
+      // Optimization: Track output length and use memcpy instead of repeated strncat/strlen
+      // This eliminates O(N^2) complexity (Shlemiel the Painter's algorithm)
+      for (int i = 0; i < n; i++) {
+        const char *item = obj_str(jni_obj_array_get(jarr, i));
+        size_t len = strlen(item);
+        if (i > 0) {
+          out[out_len++] = '\n';
+        }
+        memcpy(out + out_len, item, len);
+        out_len += len;
+      }
+      out[out_len] = '\0';
+      prefs_set_string(obj_str(jkey), out);
+      free(out);
     }
-    prefs_set_string(obj_str(jkey), out);
-    free(out);
     return;
   }
 
