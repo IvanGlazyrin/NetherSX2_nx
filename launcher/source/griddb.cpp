@@ -162,42 +162,56 @@ static int hex_digit(char value) {
 static bool parse_json_string(const std::string &json, size_t position, std::string &output) {
   if (position >= json.size() || json[position] != '"') return false;
   std::string parsed;
-  for (size_t index = position + 1; index < json.size(); ++index) {
-    unsigned char value = (unsigned char)json[index];
-    if (value == '"') { output.swap(parsed); return true; }
-    if (value != '\\') { parsed += (char)value; continue; }
-    if (++index >= json.size()) return false;
-    char escaped = json[index];
-    if (escaped == '"' || escaped == '\\' || escaped == '/') parsed += escaped;
-    else if (escaped == 'b') parsed += '\b';
-    else if (escaped == 'f') parsed += '\f';
-    else if (escaped == 'n') parsed += '\n';
-    else if (escaped == 'r') parsed += '\r';
-    else if (escaped == 't') parsed += '\t';
-    else if (escaped == 'u') {
-      if (index + 4 >= json.size()) return false;
-      unsigned codepoint = 0;
-      for (int digit = 0; digit < 4; ++digit) {
-        int part = hex_digit(json[++index]);
-        if (part < 0) return false;
-        codepoint = (codepoint << 4) | (unsigned)part;
+  size_t start = position + 1;
+  size_t end = json.size();
+
+  while (start < end) {
+      size_t next_special = json.find_first_of("\"\\", start);
+      if (next_special == std::string::npos) return false;
+
+      parsed.append(json, start, next_special - start);
+
+      if (json[next_special] == '"') {
+          output.swap(parsed);
+          return true;
       }
-      if (codepoint >= 0xd800 && codepoint <= 0xdbff && index + 6 < json.size() &&
-          json[index + 1] == '\\' && json[index + 2] == 'u') {
-        unsigned low = 0;
-        bool valid = true;
+
+      size_t index = next_special + 1;
+      if (index >= end) return false;
+
+      char escaped = json[index];
+      if (escaped == '"' || escaped == '\\' || escaped == '/') parsed += escaped;
+      else if (escaped == 'b') parsed += '\b';
+      else if (escaped == 'f') parsed += '\f';
+      else if (escaped == 'n') parsed += '\n';
+      else if (escaped == 'r') parsed += '\r';
+      else if (escaped == 't') parsed += '\t';
+      else if (escaped == 'u') {
+        if (index + 4 >= end) return false;
+        unsigned codepoint = 0;
         for (int digit = 0; digit < 4; ++digit) {
-          int part = hex_digit(json[index + 3 + digit]);
-          if (part < 0) { valid = false; break; }
-          low = (low << 4) | (unsigned)part;
+          int part = hex_digit(json[++index]);
+          if (part < 0) return false;
+          codepoint = (codepoint << 4) | (unsigned)part;
         }
-        if (valid && low >= 0xdc00 && low <= 0xdfff) {
-          codepoint = 0x10000 + ((codepoint - 0xd800) << 10) + (low - 0xdc00);
-          index += 6;
+        if (codepoint >= 0xd800 && codepoint <= 0xdbff && index + 6 < end &&
+            json[index + 1] == '\\' && json[index + 2] == 'u') {
+          unsigned low = 0;
+          bool valid = true;
+          for (int digit = 0; digit < 4; ++digit) {
+            int part = hex_digit(json[index + 3 + digit]);
+            if (part < 0) { valid = false; break; }
+            low = (low << 4) | (unsigned)part;
+          }
+          if (valid && low >= 0xdc00 && low <= 0xdfff) {
+            codepoint = 0x10000 + ((codepoint - 0xd800) << 10) + (low - 0xdc00);
+            index += 6;
+          }
         }
-      }
-      append_utf8(parsed, codepoint);
-    } else return false;
+        append_utf8(parsed, codepoint);
+      } else return false;
+
+      start = index + 1;
   }
   return false;
 }
@@ -224,7 +238,7 @@ static std::vector<std::string> json_data_objects(const std::string &json) {
       if (depth++ == 0) start = index;
     } else if (value == '}' && depth > 0) {
       if (--depth == 0 && start != std::string::npos) {
-        objects.emplace_back(json.substr(start, index - start + 1));
+        objects.emplace_back(json, start, index - start + 1);
         start = std::string::npos;
       }
     } else if (value == ']' && depth == 0) break;
