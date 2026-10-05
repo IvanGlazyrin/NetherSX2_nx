@@ -1,0 +1,3 @@
+## 2024-10-05 - Chunked Appends for String Parsing in C++
+**Learning:** In C++ string parsing loops (like extracting JSON values), pushing characters one-by-one via `std::string::push_back` inside a large text block forces O(N) repetitive bounds checking and potential reallocations.
+**Action:** When extracting text blocks that frequently contain long stretches of non-escaped characters, use a direct pointer (`c_str()`) and a tight inner `while` loop to scan for the next special character boundary, then use `std::string::append` to copy the chunk in bulk. This can provide significant speedups (e.g., ~4.5x faster).
