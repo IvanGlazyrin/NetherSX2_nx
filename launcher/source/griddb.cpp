@@ -208,26 +208,31 @@ static std::vector<std::string> json_data_objects(const std::string &json) {
   if (data == std::string::npos) return objects;
   size_t array = json.find('[', data + 6);
   if (array == std::string::npos) return objects;
-  bool quoted = false, escaped = false;
+  bool quoted = false;
   int depth = 0;
   size_t start = std::string::npos;
-  for (size_t index = array + 1; index < json.size(); ++index) {
-    char value = json[index];
+  for (size_t index = array + 1; index < json.size(); ) {
     if (quoted) {
-      if (escaped) escaped = false;
-      else if (value == '\\') escaped = true;
-      else if (value == '"') quoted = false;
-      continue;
-    }
-    if (value == '"') { quoted = true; continue; }
-    if (value == '{') {
-      if (depth++ == 0) start = index;
-    } else if (value == '}' && depth > 0) {
-      if (--depth == 0 && start != std::string::npos) {
-        objects.emplace_back(json.substr(start, index - start + 1));
-        start = std::string::npos;
+      size_t next = json.find_first_of("\"\\", index);
+      if (next == std::string::npos) break;
+      if (json[next] == '\\') index = next + 2;
+      else { quoted = false; index = next + 1; }
+    } else {
+      size_t next = json.find_first_of("\"{}[]", index);
+      if (next == std::string::npos) break;
+      char value = json[next];
+      if (value == '"') quoted = true;
+      else if (value == '{') { if (depth++ == 0) start = next; }
+      else if (value == '}') {
+        if (depth > 0 && --depth == 0 && start != std::string::npos) {
+          objects.emplace_back(json, start, next - start + 1);
+          start = std::string::npos;
+        }
+      } else if (value == ']') {
+        if (depth == 0) break;
       }
-    } else if (value == ']' && depth == 0) break;
+      index = next + 1;
+    }
   }
   return objects;
 }
