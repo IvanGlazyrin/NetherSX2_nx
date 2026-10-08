@@ -35,10 +35,20 @@
 // Avoids a double slash when dir already ends in '/'.
 static void path_join(char *out, size_t cap, const char *dir, const char *name) {
   size_t dl = strlen(dir);
-  if (dl && dir[dl - 1] == '/')
-    snprintf(out, cap, "%s%s", dir, name);
-  else
-    snprintf(out, cap, "%s/%s", dir, name);
+  size_t nl = strlen(name);
+  int has_slash = (dl > 0 && dir[dl - 1] == '/');
+  size_t required = dl + nl + (has_slash ? 0 : 1) + 1;
+  if (required > cap) {
+    if (has_slash) snprintf(out, cap, "%s%s", dir, name);
+    else snprintf(out, cap, "%s/%s", dir, name);
+    return;
+  }
+  memcpy(out, dir, dl);
+  char *ptr = out + dl;
+  if (!has_slash) {
+    *ptr++ = '/';
+  }
+  memcpy(ptr, name, nl + 1);
 }
 
 // st_mode -> StatResult/FindResult flags. The DIRECTORY bit is the one the core
