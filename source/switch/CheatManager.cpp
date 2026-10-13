@@ -52,7 +52,7 @@ struct ParsedFile {
   std::vector<size_t> visible_groups;
 };
 
-size_t skip_space(const std::string &value, size_t offset = 0) {
+size_t skip_space(std::string_view value, size_t offset = 0) {
   if (offset == 0 && value.size() >= 3 &&
       static_cast<unsigned char>(value[0]) == 0xef &&
       static_cast<unsigned char>(value[1]) == 0xbb &&
@@ -64,7 +64,7 @@ size_t skip_space(const std::string &value, size_t offset = 0) {
   return offset;
 }
 
-std::string trim_copy(const std::string &value) {
+std::string_view trim_view(std::string_view value) {
   size_t first = skip_space(value);
   size_t last = value.size();
   while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])))
@@ -72,7 +72,7 @@ std::string trim_copy(const std::string &value) {
   return value.substr(first, last - first);
 }
 
-bool starts_with_ci(const std::string &value, size_t offset, const char *prefix) {
+bool starts_with_ci(std::string_view value, size_t offset, const char *prefix) {
   for (size_t index = 0; prefix[index]; index++) {
     if (offset + index >= value.size() ||
         std::tolower(static_cast<unsigned char>(value[offset + index])) !=
@@ -82,8 +82,8 @@ bool starts_with_ci(const std::string &value, size_t offset, const char *prefix)
   return true;
 }
 
-std::string display_name(std::string name) {
-  name = trim_copy(name);
+std::string display_name(std::string_view name_in) {
+  std::string name(trim_view(name_in));
   static const char *prefixes[] = {"cheats\\", "cheat\\", "patches\\", "patch\\"};
   for (const char *prefix : prefixes) {
     if (starts_with_ci(name, 0, prefix)) {
@@ -99,7 +99,7 @@ std::string display_name(std::string name) {
   return name;
 }
 
-bool find_patch(const std::string &line, size_t *patch_offset, PatchKind *kind) {
+bool find_patch(std::string_view line, size_t *patch_offset, PatchKind *kind) {
   size_t offset = skip_space(line);
   if (starts_with_ci(line, offset, "patch=")) {
     *patch_offset = offset;
@@ -127,7 +127,7 @@ bool find_patch(const std::string &line, size_t *patch_offset, PatchKind *kind) 
   return true;
 }
 
-bool comment_heading(const std::string &line, std::string *heading) {
+bool comment_heading(std::string_view line, std::string *heading) {
   size_t offset = skip_space(line);
   if (offset + 1 < line.size() && line[offset] == '/' && line[offset + 1] == '/')
     offset += 2;
@@ -135,7 +135,7 @@ bool comment_heading(const std::string &line, std::string *heading) {
     offset++;
   else
     return false;
-  std::string value = trim_copy(line.substr(offset));
+  std::string_view value = trim_view(line.substr(offset));
   if (value.empty() || starts_with_ci(value, 0, "patch=") ||
       starts_with_ci(value, 0, "[NetherSX2-nx disabled]"))
     return false;
@@ -153,7 +153,7 @@ bool comment_heading(const std::string &line, std::string *heading) {
   return true;
 }
 
-int add_group(ParsedFile *parsed, const std::string &name, unsigned unnamed_index) {
+int add_group(ParsedFile *parsed, std::string_view name, unsigned unnamed_index) {
   Group group;
   if (name.empty())
     group.name = "Unnamed code " + std::to_string(unnamed_index);
@@ -194,7 +194,7 @@ bool parse_bytes(const std::string &contents, ParsedFile *parsed) {
   unsigned unnamed_index = 1;
 
   for (Line &line : parsed->lines) {
-    std::string trimmed = trim_copy(line.text);
+    std::string_view trimmed = trim_view(line.text);
     if (trimmed.size() >= 3 && trimmed.front() == '[' && trimmed.back() == ']') {
       section_group = add_group(parsed, trimmed.substr(1, trimmed.size() - 2), unnamed_index++);
       legacy_group = -1;
@@ -395,10 +395,11 @@ extern "C" int nx_cheat_set_enabled(const char *path, size_t entry, int enabled)
     const bool currently_on = line.patch_kind == kActivePatch;
     if (currently_on == turn_on) continue;
     const size_t indentation = skip_space(line.text);
-    const std::string patch = line.text.substr(line.patch_offset);
-    line.text.erase(indentation);
-    if (!turn_on) line.text += kDisabledMarker;
-    line.text += patch;
+    if (turn_on) {
+      line.text.erase(indentation, line.patch_offset - indentation);
+    } else {
+      line.text.insert(indentation, kDisabledMarker);
+    }
     line.patch_kind = turn_on ? kActivePatch : kManagedDisabledPatch;
     changed = true;
   }
