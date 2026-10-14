@@ -8,7 +8,22 @@ JOBS=${JOBS:-18}
 
 APP="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$APP")"
-CORES_DIR="${CORES_DIR:-$ROOT}"
+if [[ -z "${CORES_DIR:-}" ]]; then
+  CORES_DIR="$ROOT"
+  if [[ -d "$APP/out/cores" ]]; then CORES_DIR="$APP/out/cores"; fi
+fi
+if [[ -n "${APK_4248:-}${APK_3668:-}" ]]; then
+  [[ -n "${APK_4248:-}" && -n "${APK_3668:-}" ]] || {
+    echo "Set both APK_4248 and APK_3668." >&2; exit 1;
+  }
+  CORES_DIR="$APP/out/cores"
+  python3 "$APP/tools/prepare_build_inputs.py" --apk-4248 "$APK_4248" \
+    --apk-3668 "$APK_3668" --cores-dir "$CORES_DIR"
+fi
+if [[ -n "${MESA_SDK_ZIP:-}" ]]; then
+  export MESA_SDK_ROOT="$APP/out/mesa-sdk"
+  python3 "$APP/tools/prepare_build_inputs.py" --mesa-sdk "$MESA_SDK_ZIP" --sdk-dir "$MESA_SDK_ROOT"
+fi
 
 required=(
   "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so"
@@ -38,7 +53,9 @@ command -v ninja >/dev/null || { echo "ninja is required." >&2; exit 1; }
 DEPS_BUILD="$APP/launcher/dependencies/build"
 if [[ -f "$DEPS_BUILD/CMakeCache.txt" ]] &&
    ! grep -q '^CMAKE_GENERATOR:INTERNAL=Ninja$' "$DEPS_BUILD/CMakeCache.txt"; then
-  cmake -E rm -rf "$DEPS_BUILD"
+  echo "Storage dependency cache uses another generator: $DEPS_BUILD" >&2
+  echo "Move the old generated build directory before rebuilding with Ninja." >&2
+  exit 1
 fi
 
 echo "==== launcher storage dependencies ===="
@@ -58,16 +75,36 @@ fi
 cmake "${deps_args[@]}"
 cmake --build "$DEPS_BUILD" --parallel "$JOBS"
 
-echo "==== emulator: Vulkan (NVK) ===="
+echo "==== native Deko3D shader compiler + LSFG dependencies ===="
+DEKO3D_DEPS_ROOT="${DEKO3D_DEPS_ROOT:-$APP/out/deko3d-deps}"
+dk_args=(
+  -S "$APP/source/deko3d/compiler"
+  -B "$DEKO3D_DEPS_ROOT"
+  -G Ninja
+  -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/Switch.cmake"
+  -DCMAKE_BUILD_TYPE=Release
+  -DDEKO3D_SHADER_TESTS=OFF
+)
+if [[ -n "${UAM_SOURCE:-}" ]]; then
+  dk_args+=( -DFETCHCONTENT_SOURCE_DIR_DOLPHIN_UAM="$UAM_SOURCE" )
+fi
+if [[ -n "${SPIRV_CROSS_SOURCE:-}" ]]; then
+  dk_args+=( -DFETCHCONTENT_SOURCE_DIR_SPIRV_CROSS="$SPIRV_CROSS_SOURCE" )
+fi
+cmake "${dk_args[@]}"
+cmake --build "$DEKO3D_DEPS_ROOT" --parallel "$JOBS"
+
+echo "==== emulator: native Deko3D ===="
 cd "$APP"
-make clean >/dev/null 2>&1
-make -j"$JOBS" RENDERER=VK
-cp -f NetherSX2_nx.nro NetherSX2_nx_vk.nro
+DK_BUILD=build-dk
+DK_TARGET=NetherSX2_nx_dk
+make -j"$JOBS" RENDERER=DK BUILD="$DK_BUILD" TARGET="$DK_TARGET" DEKO3D_DEPS_ROOT="$DEKO3D_DEPS_ROOT"
+
+echo "==== emulator: Vulkan (NVK) ===="
+make -j"$JOBS" RENDERER=VK BUILD=build-vk TARGET=NetherSX2_nx_vk
 
 echo "==== emulator: OpenGL ===="
-make clean >/dev/null 2>&1
-make -j"$JOBS"
-cp -f NetherSX2_nx.nro NetherSX2_nx_gl.nro
+make -j"$JOBS" RENDERER=GL BUILD=build-gl TARGET=NetherSX2_nx_gl
 
 echo "==== bundle cores + emulator binaries into the launcher romfs ===="
 mkdir -p "$APP/launcher/romfs/cores" "$APP/launcher/romfs/emu"
@@ -75,26 +112,21 @@ cp -f "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so" "$APP/launch
 cp -f "$CORES_DIR/NetherSX2-v2.2n-3668/lib/arm64-v8a/libemucore.so" "$APP/launcher/romfs/cores/emucore_3668.so"
 cp -f "$APP/NetherSX2_nx_vk.nro" "$APP/launcher/romfs/emu/NetherSX2_nx_vk.nro"
 cp -f "$APP/NetherSX2_nx_gl.nro" "$APP/launcher/romfs/emu/NetherSX2_nx_gl.nro"
+cp -f "$APP/$DK_TARGET.nro" "$APP/launcher/romfs/emu/NetherSX2_nx_dk.nro"
 
 echo "==== bundle per-build resources into the launcher romfs ===="
-for b in 4248 3668; do
-  rd="$APP/launcher/romfs/res/$b"
-  rm -rf "$rd"; mkdir -p "$rd"
-  cp -rf "$CORES_DIR/NetherSX2-v2.2n-$b/assets/." "$rd/"
-  rm -rf "$rd/dexopt"
-done
+python3 "$APP/tools/bundle_resources.py" --cores-dir "$CORES_DIR"
 
 echo "==== forwarder stub (built in-tree from launcher/fwd/) ===="
-make -C "$APP/launcher/fwd" clean >/dev/null 2>&1
 make -j"$JOBS" -C "$APP/launcher/fwd"
 
 echo "==== launcher (SDL2 addon) ===="
 cd "$APP/launcher"
-make clean >/dev/null 2>&1
 make -j"$JOBS"
 
 mv -f "$APP/launcher/NetherSX2.nro" "$APP/NetherSX2.nro"
-rm -f "$APP/NetherSX2_nx.nro" "$APP/NetherSX2_nx_vk.nro" "$APP/NetherSX2_nx_gl.nro"
+python3 "$APP/tools/check_deko3d_build.py" --cores-dir "$CORES_DIR" \
+  --map "$APP/$DK_BUILD/$DK_TARGET.map" --native-nro "$APP/$DK_TARGET.nro" --bundle "$APP/NetherSX2.nro"
 
 echo
 echo "Done. The only file to copy:"

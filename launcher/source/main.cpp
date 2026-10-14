@@ -373,7 +373,7 @@ struct Opt {
 #define O_STATUSK(l,k)         { l, k, OT_STATUS, nullptr,0, 0,0,0, nullptr, 0, nullptr, nullptr, 1, nullptr }
 
 static const Choice C_backend[]  = { {"Vulkan (NVK)","14"}, {"OpenGL (NVC0)","12"},
-                                     {"OpenGL (Zink/NVK)","13"} };
+                                     {"OpenGL (Zink/NVK)","13"}, {"Deko3D (Native)","15"} };
 static const Choice C_build[]    = { {"Patched (4248)","4248"}, {"Classic (3668)","3668"} };
 static const Choice C_fastmem[]  = { {"Off","off"}, {"On","hybrid"} };
 static const Choice C_upscale[]  = { {"0.25x","0.25"},{"0.5x","0.5"},{"0.75x","0.75"},
@@ -463,7 +463,7 @@ static const Opt S_enhance[] = {
   O_CHOICE("HW download mode", "EmuCore/GS/HWDownloadMode", C_hwdl, "0"),
 };
 static const Opt S_framegen[] = {
-  O_CHOICE("LSFG 2x (Vulkan only)", "Wrapper/LSFGEnabled", C_bool, "false"),
+  O_CHOICE("LSFG 2x (Vulkan / Deko3D)", "Wrapper/LSFGEnabled", C_bool, "false"),
   O_CHOICEG("Flow resolution", "Wrapper/LSFGFlowScale", C_lsfgFlow, "0.25", "Wrapper/LSFGEnabled", "false"),
   O_CHOICEG("Performance mode", "Wrapper/LSFGPerformance", C_bool, "true", "Wrapper/LSFGEnabled", "false"),
   O_STATUS("Lossless.dll"),
@@ -609,7 +609,7 @@ static const SettingHelpEntry SETTING_HELP[] = {
   {"Wrapper/Language", "Launcher language",
    "Selects the language used by the SDL launcher. System follows the language configured on the Switch. Game names, paths, server messages and user-entered text are never translated."},
   {"EmuCore/GS/Renderer", "Graphics backend",
-   "Chooses the graphics backend used by the emulator. Vulkan (NVK) is recommended and required for frame generation. OpenGL can use native NVC0 or Zink over NVK for renderer-specific compatibility testing."},
+   "Chooses the graphics backend used by the emulator. Deko3D renders PS2 GS draws directly on the Switch GPU. Vulkan (NVK) and Deko3D support frame generation. OpenGL can use native NVC0 or Zink over NVK."},
   {"EmuCore/GS/upscale_multiplier", "Resolution / performance",
    "Sets the internal resolution used for 3D rendering. Higher scales improve clarity but increase GPU load; sub-native scales reduce GPU work at the cost of image quality. Pre-rendered FMV resolution does not change."},
   {"EmuCore/GS/AspectRatio", "Display geometry",
@@ -677,7 +677,7 @@ static const SettingHelpEntry SETTING_HELP[] = {
    "Changes synchronization for data read back from the GPU. Accurate is safest. Less synchronized modes may improve demanding games but can break effects, videos, or other rendering that depends on GS downloads."},
 
   {"Wrapper/LSFGEnabled", "Frame generation",
-   "Makes LSFG 2x available for this launch. Frame generation still starts Off in-game and must be enabled from the overlay. On Switch's 60 Hz output, 25/30 FPS sources are interpolated while native 50/60 FPS sources automatically stay on the normal presentation path so emulation is never halved. Requires Vulkan and Lossless.dll and may add artifacts or latency."},
+   "Makes LSFG 2x available for this launch. Frame generation starts Off in-game and must be enabled from the overlay. Native 50/60 FPS sources use protected passthrough. Requires Vulkan or Deko3D and a user-supplied Lossless.dll."},
   {"Wrapper/LSFGFlowScale", "Frame generation quality",
    "Sets the resolution used for optical-flow analysis. Half can retain more motion detail but costs considerably more GPU time and memory; Quarter is recommended on Switch."},
   {"Wrapper/LSFGPerformance", "Frame generation performance",
@@ -4372,16 +4372,21 @@ static void runFileManager() {
 
 static const char *optDefault(const Opt &o) {
   if(o.key && !strcmp(o.key,"EmuCore/GS/DisableThreadedPresentation"))
-    return !strcmp(iniGet("EmuCore/GS/Renderer","14"),"14") ? "true" : "false";
+    return !strcmp(iniGet("EmuCore/GS/Renderer","14"),"14") ||
+           !strcmp(iniGet("EmuCore/GS/Renderer","14"),"15") ? "true" : "false";
   return o.def;
 }
 static int choiceIdx(const Opt &o) {
+  if(o.key && !strcmp(o.key,"EmuCore/GS/DisableThreadedPresentation") &&
+     !strcmp(iniGet("EmuCore/GS/Renderer","14"),"15")) return 1;
   const char *cur = iniGet(o.key,optDefault(o));
   for (int i=0;i<o.nch;i++) if (!strcmp(o.ch[i].val, cur)) return i;
   return -1;
 }
 static bool optEnabled(const Opt &o) {
   if(o.type==OT_STATUS) return true;
+  if(o.key && !strcmp(o.key,"EmuCore/GS/DisableThreadedPresentation") &&
+     !strcmp(iniGet("EmuCore/GS/Renderer","14"),"15")) return false;
   if(o.key && !strncmp(o.key,"Wrapper/LSFG",12) && !lsfgDllInstalled())
     return false;
   if(o.key && !strcmp(o.key,"EmuCore/GS/SkipDuplicateFrames") &&
@@ -4742,7 +4747,7 @@ static const char *settingsScreenDescription(int screen) {
     case SCR_ENHANCE:
       return "Contains advanced GS accuracy controls, visual enhancements, custom-texture support, and game-specific rendering workarounds. Higher accuracy often requires more GPU time.";
     case SCR_FRAMEGEN:
-      return "Configures Vulkan-only LSFG 2x support for a launch. It interpolates 25/30 FPS sources to the 60 Hz display; native 50/60 FPS sources automatically use protected passthrough to avoid slowing emulation.";
+      return "Configures Vulkan and Deko3D LSFG 2x support for a launch. It interpolates 25/30 FPS sources to the 60 Hz display; native 50/60 FPS sources use protected passthrough.";
     case SCR_AUDIO:
       return "Controls final volume, SPU2 interpolation, synchronization, and buffering. Smaller buffers reduce audio delay but are less tolerant of uneven performance.";
     case SCR_EMU:
@@ -7807,12 +7812,10 @@ int main(int argc, char **argv){
     std::string build=storeGet(effective,"Wrapper/CoreBuild","4248");
     if(build!="4248"&&build!="3668") build="4248";
     const std::string backend=storeGet(effective,"EmuCore/GS/Renderer","14");
-    const std::string renderer=backend=="14"?"vk":"gl";
+    const std::string renderer=backend=="15"?"dk":backend=="14"?"vk":"gl";
     storeSet(effective,"Wrapper/GLDriver",backend=="13"?"zink":"nvc0");
-    // The Android core only knows its native renderer enum. Zink is selected by the host before
-    // EGL initialization while the emulated GS still receives the OpenGL renderer value.
     storeSet(effective,"EmuCore/GS/Renderer",renderer=="vk"?"14":"12");
-    const bool disableThreadedPresentation=!strcmp(
+    const bool disableThreadedPresentation=renderer=="dk"||!strcmp(
         storeGet(effective,"EmuCore/GS/DisableThreadedPresentation","false"),"true");
     if(build=="3668"){
       storeSet(effective,"EmuCore/GS/ThreadedPresentation",
@@ -7868,10 +7871,7 @@ int main(int argc, char **argv){
     if(!gameCRCPath.empty()) storeSet(effective,"Wrapper/GameCRCPath",gameCRCPath.c_str());
     const bool lsfgRequested=!strcmp(storeGet(effective,"Wrapper/LSFGEnabled","false"),"true");
     const char *lsfgWarning=nullptr;
-    if(lsfgRequested&&renderer!="vk"){
-      // LSFG is a Vulkan-only presentation feature. Keep the saved preference
-      // for Vulkan, but silently disable it in this merged launch profile when
-      // the OpenGL backend is selected.
+    if(lsfgRequested&&renderer!="vk"&&renderer!="dk"){
       storeSet(effective,"Wrapper/LSFGEnabled","false");
     } else if(lsfgRequested&&!lsfgDllInstalled()){
       storeSet(effective,"Wrapper/LSFGEnabled","false");

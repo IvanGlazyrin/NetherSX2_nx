@@ -33,9 +33,7 @@
 #include "SwitchStorageBridge.h"
 #include "CheatManager.h"
 #include "ra_http.h"
-#ifdef USE_VULKAN
-#include "hooks/vk.h"
-#endif
+#include "lsfg_control.h"
 
 // Android MotionEvent axis codes (handleControllerAxisEvent expects these)
 #define AAXIS_X         0
@@ -60,7 +58,7 @@ static void *NATIVE_CLASS = NULL; // jclass for the NativeLibrary static natives
 static void *FAKE_CONTEXT = NULL; // android.content.Context
 static void *FAKE_SURFACE = NULL; // android.view.Surface
 
-#if GS_RENDERER == GS_RENDERER_VK
+#if GS_RENDERER == GS_RENDERER_VK || defined(USE_DEKO3D)
 // NVK opens the GPU (nvInitialize/nvMap) internally during vkCreateInstance and
 // needs a larger NV transfer-memory arena than the GL path's libnx default.
 // libnx declares this weak; a strong definition here overrides it. Tune on
@@ -404,6 +402,10 @@ static void run_startup_sequence(void) {
   // Force the selected renderer and boot disc, overriding any defaults the core
   // wrote during initialize.
   prefs_set_int("EmuCore/GS/Renderer", GS_RENDERER);
+#ifdef USE_DEKO3D
+  prefs_set_bool("EmuCore/GS/DisableThreadedPresentation", true);
+  prefs_set_bool("EmuCore/GS/ThreadedPresentation", false);
+#endif
   prefs_set_string("EmuCore/DiscPath", g_disc_path);
   prefs_set_string("EmuCore/EnableFastBoot",
                    !g_bios_boot && prefs_get_bool("Wrapper/FastBoot", true) ? "1" : "0");
@@ -782,7 +784,7 @@ typedef enum {
   QUICK_ITEM_MAPPING,
   QUICK_ITEM_CHEATS,
   QUICK_ITEM_ACHIEVEMENTS,
-#ifdef USE_VULKAN
+#ifdef USE_FRAME_GENERATION
   QUICK_ITEM_LSFG,
 #endif
   QUICK_ITEM_FRAMERATE,
@@ -821,7 +823,7 @@ static int g_quick_menu_ee_cycle_rate;
 static int g_quick_menu_ee_cycle_skip;
 static int g_quick_menu_restore_messages;
 static int g_quick_menu_ready;
-#ifdef USE_VULKAN
+#ifdef USE_FRAME_GENERATION
 static int g_quick_menu_lsfg_enabled;
 #endif
 
@@ -893,7 +895,7 @@ static bool quick_menu_toggle_analog(void) {
 static bool quick_menu_item_available(int item) {
   if (item == QUICK_ITEM_ACHIEVEMENTS)
     return nl.isCheevosActive && nl.getCheevoList;
-#ifdef USE_VULKAN
+#ifdef USE_FRAME_GENERATION
   if (item == QUICK_ITEM_LSFG) return vk_lsfg_is_available();
 #else
   (void)item;
@@ -913,7 +915,7 @@ static void quick_menu_draw_main(void) {
   static const char *labels[] = {
     "Resume game", "State slot", "Load state", "Save state",
     "Change disc", "Controller mapping", "Cheat codes", "Achievements",
-#ifdef USE_VULKAN
+#ifdef USE_FRAME_GENERATION
     "Frame Generation",
 #endif
     "Frame Rate Control", "Reset console", "Exit game"
@@ -926,7 +928,7 @@ static void quick_menu_draw_main(void) {
                          quick_menu_item_available(i) ? "> " : "  ";
     if (i == QUICK_ITEM_STATE_SLOT)
       text_append(text, sizeof(text), "%s%s: %d\n", marker, labels[i], g_quick_menu_slot);
-#ifdef USE_VULKAN
+#ifdef USE_FRAME_GENERATION
     else if (i == QUICK_ITEM_LSFG) {
       if (!vk_lsfg_is_available())
         text_append(text, sizeof(text), "  %s: Disabled\n", labels[i]);
@@ -1285,7 +1287,7 @@ static void quick_menu_open(void) {
   g_quick_menu_ee_cycle_skip = prefs_get_int("EmuCore/Speedhacks/EECycleSkip", 0);
   if (g_quick_menu_ee_cycle_skip < 0) g_quick_menu_ee_cycle_skip = 0;
   if (g_quick_menu_ee_cycle_skip > 3) g_quick_menu_ee_cycle_skip = 3;
-#ifdef USE_VULKAN
+#ifdef USE_FRAME_GENERATION
   g_quick_menu_lsfg_enabled = vk_lsfg_is_enabled();
 #endif
   if (!prefs_get_bool("EmuCore/GS/OsdShowMessages", true)) {
@@ -1383,7 +1385,7 @@ static void quick_menu_save_prefs_preserving_messages(void) {
     prefs_set_bool("EmuCore/GS/OsdShowMessages", true);
 }
 
-#ifdef USE_VULKAN
+#ifdef USE_FRAME_GENERATION
 static void quick_menu_set_lsfg_enabled(bool enabled) {
   g_quick_menu_lsfg_enabled = enabled;
   vk_lsfg_request_enabled(enabled);
@@ -1503,7 +1505,7 @@ static bool quick_menu_update(u64 down, u64 pressed) {
           quick_menu_refresh_achievements();
           quick_menu_draw_achievements();
           return true;
-#ifdef USE_VULKAN
+#ifdef USE_FRAME_GENERATION
         case QUICK_ITEM_LSFG:
           if (!g_quick_menu_lsfg_enabled && !vk_lsfg_is_available()) {
             quick_menu_status("Frame generation is disabled");
@@ -1882,7 +1884,7 @@ int main(void) {
 
   // settings store: load nethersx2.ini + seed OpenGL/folder defaults
   prefs_init(PREFS_PATH);
-#if GS_RENDERER == GS_RENDERER_OGL
+#if GS_RENDERER == GS_RENDERER_OGL && !defined(USE_DEKO3D)
   // The unified Mesa SDK contains both the native NVC0 Gallium driver and Zink. Select Zink before
   // libemucore initializes EGL; leaving the override unset preserves Mesa's native default.
   if (!strcmp(prefs_get_string("Wrapper/GLDriver", "nvc0"), "zink"))
@@ -1977,6 +1979,11 @@ int main(void) {
 #endif
 
   patch_game();
+#ifdef USE_DEKO3D
+  if (!dk_install_native_backend(g_core_so))
+    fatal_error("Deko3D: unsupported emulator core or native ABI mismatch.\n"
+                "Use the supplied v2.2n-4248 or v2.2n-3668 APK core.");
+#endif
   resolve_entry_points();
 
   so_finalize(&emu_mod);
@@ -2014,7 +2021,9 @@ int main(void) {
 #endif
   rumble_init();
 
-#if GS_RENDERER == GS_RENDERER_VK
+#ifdef USE_DEKO3D
+#define FRAME_COUNT dk_present_count
+#elif GS_RENDERER == GS_RENDERER_VK
   extern volatile int vk_present_count;
 #define FRAME_COUNT vk_present_count
 #else
@@ -2100,7 +2109,11 @@ int main(void) {
   // slot is now a no-op because it was shut down above.
   libc_finalize_core();
   pthr_shutdown();
+#ifdef USE_DEKO3D
+  dk_native_shutdown();
+#else
   egl_gl_shutdown();
+#endif
   libc_memory_shutdown();
   so_unload(&emu_mod);
   prefs_save();

@@ -18,7 +18,11 @@
 // RAM left unmapped by our newlib heap so the GPU can use it: NVK allocates
 // outside the process heap and reports free-system-memory as its Vulkan budget,
 // so claiming every byte starved the GPU and VMA then refused all allocations.
+#ifdef USE_DEKO3D
+#define GPU_RESERVE_MB 256
+#else
 #define GPU_RESERVE_MB 1024
+#endif
 
 // libemucore.so is self-contained (statically linked NDK r25b C++ runtime).
 #define SO_NAME "libemucore.so"
@@ -44,9 +48,6 @@
 #define ANDROID_DEVICE_NAME "Nintendo Switch"
 #define ANDROID_SDK_INT 30   // Android 11: gates AAudio + SAF behaviour
 
-// GSRendererType (PCSX2): OGL=12, VK=14. GL and Vulkan are mutually exclusive at
-// build time (both bundle mesa object code). The Makefile picks one: `make` =
-// OpenGL, `make RENDERER=VK` = Vulkan (NVK), which also sets -DGS_RENDERER=14.
 #define GS_RENDERER_OGL 12
 #define GS_RENDERER_VK  14
 #ifndef GS_RENDERER

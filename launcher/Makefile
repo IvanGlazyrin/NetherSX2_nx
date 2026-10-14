@@ -1,6 +1,6 @@
 #---------------------------------------------------------------------------------
 # NetherSX2 launcher -- standalone SDL2 GUI .nro that writes nethersx2.ini and
-# chainloads the chosen emulator binary (NetherSX2_nx_gl.nro / _vk.nro) via
+# chainloads the chosen emulator binary (NetherSX2_nx_dk.nro / _gl.nro / _vk.nro) via
 # envSetNextLoad. Kept OUT of the emulator source tree so its SDL2/Mesa link
 # never touches libemucore. Based on the devkitPro switch sdl2-demo template.
 #---------------------------------------------------------------------------------
@@ -153,6 +153,12 @@ $(OUTPUT).nro	:	$(OUTPUT).elf $(OUTPUT).nacp
 else
 $(OUTPUT).nro	:	$(OUTPUT).elf
 endif
+
+romfs_dependencies = $(foreach entry,$(wildcard $(1)/*),$(entry) $(call romfs_dependencies,$(entry)))
+ifneq ($(strip $(ROMFS)),)
+$(OUTPUT).nro : $(TOPDIR)/$(strip $(ROMFS)) $(call romfs_dependencies,$(TOPDIR)/$(strip $(ROMFS)))
+endif
+$(OUTPUT).nro : $(TOPDIR)/Makefile
 
 # Relink when the prebuilt storage archives change, not only on source edits.
 $(OUTPUT).elf	:	$(OFILES) $(STORAGE_LIBS)

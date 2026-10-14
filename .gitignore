@@ -1,4 +1,7 @@
 /build/
+/build-*/
+__pycache__/
+*.log
 /launcher/build/
 /launcher/dependencies/build/
 /launcher/romfs/cores/

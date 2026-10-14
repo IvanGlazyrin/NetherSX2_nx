@@ -11,7 +11,7 @@ patches it, and runs it inside a minimal Android-like
 environment natively.
 
 Everything ships as a **single `NetherSX2.nro`**: it bundles both emulator cores
-(Patched `4248` + Classic `3668`), both renderer backends (OpenGL + Vulkan/NVK)
+(Patched `4248` + Classic `3668`), three renderer backends (native Deko3D, OpenGL, Vulkan/NVK)
 and each build's data files, and extracts the ones you pick to the SD card at
 launch. An SDL cover-art launcher chooses the game, the renderer, and per-game
 settings, then chainloads the emulator.
@@ -63,10 +63,16 @@ Successful sign-in stores the returned account token in `launcher.ini`.
 Achievement progress and descriptions can be viewed during play from
 **L + R + Plus > Achievements**.
 
-LSFG 2x Frame Generation is available for the Vulkan renderer in
+Select **Settings > Graphics > Renderer > Deko3D (Native)** to use the native GS
+backend. It replaces the core's GPU device and display callbacks with Deko3D
+commands. The Deko emulator NRO is linked separately, without EGL, GLES, Vulkan,
+NVK, or Gallium driver archives. The SDL launcher uses its own graphics runtime
+and exits before the emulator starts.
+
+LSFG 2x Frame Generation is available for Vulkan and Deko3D in
 **Settings > Frame Generation**.
 You must provide your own `Lossless.dll` at `/switch/nethersx2/lsfg/Lossless.dll`.
-LSFG must be enabled before launching a game so the Vulkan session can be
+LSFG must be enabled before launching a game so its shader session can be
 prepared. Frame Generation starts **Off** in every game and must be enabled
 manually from **L + R + Plus > Frame Generation**. Skip Duplicate Frames is
 automatically enabled for prepared LSFG sessions so only unique game frames
@@ -79,14 +85,24 @@ Install the devkitPro Switch toolchain and portlibs:
 ```sh
 pacman -S devkitA64 switch-tools libnx switch-sdl2 switch-sdl2_ttf \
           switch-sdl2_image switch-curl switch-mesa switch-libdrm_nouveau \
-          switch-ntfs-3g
+          switch-ntfs-3g switch-libpng deko3d
 ```
 
 Provide a compatible Mesa NVK package under `vulkan/include` and `vulkan/lib`.
 Extract the 4248 and 3668 APKs into sibling folders named
 `NetherSX2-v2.2n-4248` and `NetherSX2-v2.2n-3668`, or set `CORES_DIR` to the
-folder containing them. CMake, Ninja, and Git are required; the build downloads pinned
-libsmb2 and libusbhsfs revisions.
+folder containing them. Alternatively, extract the supplied inputs without
+installing the Mesa SDK into the toolchain:
+
+```sh
+python3 tools/prepare_build_inputs.py --apk-4248 /path/to/NetherSX2-v2.2n-4248.apk \
+  --apk-3668 /path/to/NetherSX2-v2.2n-3668.apk --mesa-sdk /path/to/mesa-sdk.zip
+export MESA_SDK_ROOT="$PWD/out/mesa-sdk"
+```
+
+CMake, Ninja, Git, Bison, Flex, Python, and Python Mako are required. The build
+downloads pinned libsmb2, libusbhsfs, UAM and SPIRV-Cross revisions. Deko3D is
+built as an independent emulator NRO and bundled alongside the existing backends.
 
 ```sh
 ./build_all.sh
@@ -100,6 +116,9 @@ libsmb2 and libusbhsfs revisions.
 * TheOfficialFloW for the original Android so-loader lineage.
 * Dantiicu for Switch Vulkan driver.
 * Slluxx for IconGrabber.
+* devkitPro and fincs for Deko3D and UAM.
+* Dolphin-NX, the Dolphin Emulator Project, and PalindromicBreadLoaf for the
+  runtime UAM integration and portable native LSFG library adapted here.
 
 ### Support
 
@@ -115,4 +134,6 @@ BIOS dump and legally-owned game images. We do not condone piracy.
 
 Unless noted otherwise, the source in this repository is under the MIT License
 (see LICENSE). The vendored LSFG-VK subset under `third_party/lsfg-vk` is
-GPL-3.0-or-later.
+GPL-3.0-or-later. The native LSFG library under `third_party/lsfg-deko3d` is also
+GPL-3.0-or-later, and its adapted UAM bridge/build integration under
+`source/deko3d/compiler` is GPL-2.0-or-later. Their original notices are preserved.

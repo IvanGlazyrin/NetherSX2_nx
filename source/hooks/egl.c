@@ -4,6 +4,7 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 
+#ifndef USE_DEKO3D
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -356,3 +357,4 @@ const GLubyte *glGetStringHook(GLenum name) {
     default:          return (const GLubyte *)"";
   }
 }
+#endif

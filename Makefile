@@ -14,7 +14,7 @@ TARGET		:=	$(notdir $(CURDIR))
 APP_TITLE	:=	NetherSX2
 APP_AUTHOR	:=	naga
 APP_VERSION	:=	1.3.0
-BUILD		:=	build
+BUILD		?=	build-$(RENDERER)
 SOURCES		:=	source source/hooks source/switch
 DATA		:=	data
 INCLUDES	:=	source source/switch \
@@ -35,16 +35,20 @@ ifneq ($(strip $(NETHERSX2_VK_DIAGNOSTIC)),)
 DEFINES += -DNETHERSX2_VK_DIAGNOSTIC
 endif
 
-# --- renderer select: GL (default) or VK (Mesa NVK) ------------------------
-# GL and Vulkan are mutually exclusive (switch-mesa's libEGL/GLES and the NVK
-# archives both bundle mesa util/nir/compiler object code -> can't co-link).
-#   make             -> OpenGL (switch-mesa GLES, unchanged)
-#   make RENDERER=VK -> Vulkan (Mesa NVK, vendored flat under vulkan/)
 RENDERER ?= GL
 MESA_SDK_ROOT ?=
 ifneq ($(strip $(MESA_SDK_ROOT)),)
+ifneq ($(RENDERER),DK)
 DEFINES += -DUSE_UNIFIED_MESA
 endif
+endif
+ifeq ($(RENDERER),DK)
+TARGET := $(notdir $(CURDIR))_dk
+DEFINES += -DUSE_DEKO3D -DGS_RENDERER=12
+SOURCES += source/deko3d
+DEKO3D_DEPS_ROOT ?= $(TOPDIR)/out/deko3d-deps
+INCLUDES += source/deko3d third_party/lsfg-deko3d/include $(DEKO3D_DEPS_ROOT)/lsfg/include
+else
 ifeq ($(RENDERER),VK)
 DEFINES	+=	-DUSE_VULKAN -DGS_RENDERER=14 -DVK_USE_PLATFORM_VI_NN
 SOURCES	+=	source/lsfg \
@@ -61,6 +65,7 @@ INCLUDES	+=	source/lsfg \
 else
 DEFINES	+=	-DGS_RENDERER=12
 endif
+endif
 
 CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) \
 			$(ARCH) $(DEFINES)
@@ -76,6 +81,14 @@ STORAGE_LIBS := $(TOPDIR)/launcher/dependencies/build/_deps/libsmb2-build/lib/li
 
 # nx: libnx (audren for the AAudio shim, HID, applet, fs). m: libm. No SDL2/
 # OpenSL ES -- audio is the in-tree AAudio->audren shim (source/aaudio.c).
+ifeq ($(RENDERER),DK)
+LIBDIRS := $(PORTLIBS) $(LIBNX)
+DEKO3D_LIBS := $(DEKO3D_DEPS_ROOT)/lsfg/liblsfg.a \
+              $(DEKO3D_DEPS_ROOT)/lsfg/liblsfg_spirv_cross.a \
+              $(DEKO3D_DEPS_ROOT)/uam-generated/uam_isolated.o
+LIBS := -Wl,--start-group $(DEKO3D_LIBS) -Wl,--end-group \
+        $(STORAGE_LIBS) -lcurl -lpng -lz -ldeko3d -lnx -lstdc++ -lm
+else
 ifeq ($(RENDERER),VK)
 ifneq ($(strip $(MESA_SDK_ROOT)),)
 # Unified Mesa SDK: the Vulkan driver and all private Mesa dependencies are
@@ -118,6 +131,7 @@ LIBDIRS	:= $(PORTLIBS) $(LIBNX)
 LIBS	:= $(STORAGE_LIBS) -lcurl -lz -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm
 endif
 endif
+endif
 
 #---------------------------------------------------------------------------------
 ifneq ($(BUILD),$(notdir $(CURDIR)))
@@ -145,7 +159,7 @@ export OFILES_SRC	:=	$(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
 export OFILES 	:=	$(OFILES_BIN) $(OFILES_SRC)
 export HFILES_BIN	:=	$(addsuffix .h,$(subst .,_,$(BINFILES)))
 
-export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
+export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(if $(filter /%,$(dir)),$(dir),$(CURDIR)/$(dir))) \
 			$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
 			-I$(CURDIR)/$(BUILD)
 
@@ -213,9 +227,10 @@ $(OUTPUT).nro	:	$(OUTPUT).elf
 endif
 
 # Relink when the prebuilt storage archives change, not only on source edits.
-$(OUTPUT).elf	:	$(OFILES) $(STORAGE_LIBS)
+$(OUTPUT).elf	:	$(OFILES) $(STORAGE_LIBS) $(DEKO3D_LIBS)
 
 $(OFILES_SRC)	: $(HFILES_BIN)
+$(OFILES_SRC)	: $(TOPDIR)/Makefile
 
 %.bin.o	%_bin.h :	%.bin
 	@echo $(notdir $<)

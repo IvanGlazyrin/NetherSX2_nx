@@ -23,6 +23,10 @@ void fatal_error(const char *fmt, ...) {
   vsnprintf(msg, sizeof(msg), fmt, list);
   va_end(list);
 
+#ifdef USE_DEKO3D
+  svcExitProcess();
+#endif
+
   PadState pad;
   padConfigureInput(1, HidNpadStyleSet_NpadStandard);
   padInitializeDefault(&pad);
