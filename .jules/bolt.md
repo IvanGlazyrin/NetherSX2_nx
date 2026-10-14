@@ -1,0 +1,3 @@
+## 2024-10-14 - Optimize std::string trimming with std::string_view
+**Learning:** Returning `std::string` by value from parsing functions like `Trim` causes an unnecessary heap allocation for every parsed line, even if no trimming is needed, especially when used heavily in loops like INI parsing.
+**Action:** When implementing read-only string parsing helpers like `Trim`, use `std::string_view` for both arguments and return types. This avoids temporary string allocations entirely, reducing heap fragmentation and parsing time. Explicitly convert back to `std::string` only when storing the parsed value.
