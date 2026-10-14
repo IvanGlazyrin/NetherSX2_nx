@@ -486,6 +486,7 @@ static const Opt S_emu[] = {
   O_CHOICE("MTVU (multi-VU)",  "EmuCore/Speedhacks/vuThread", C_bool, "true"),
   O_CHOICE("Instant VU1",      "EmuCore/Speedhacks/vu1Instant", C_bool, "true"),
   O_CHOICE("VU flag hack",     "EmuCore/Speedhacks/vuFlagHack", C_bool, "true"),
+  O_CHOICE("XGKick skip", "EmuCore/Patches/XGKickSkip", C_bool, "false"),
   O_SUB   ("Frame rate control...", SCR_FRAMERATE),
   O_CHOICE("Sync to refresh",  "EmuCore/GS/SyncToHostRefreshRate", C_bool, "false"),
   O_CHOICE("Game patches",     "EmuCore/EnablePatches", C_bool, "true"),
@@ -712,6 +713,8 @@ static const SettingHelpEntry SETTING_HELP[] = {
    "Uses the optimized Instant VU1 synchronization path when compatible. It usually improves performance, but should be disabled if a game develops VU-related graphics or timing errors."},
   {"EmuCore/Speedhacks/vuFlagHack", "CPU performance",
    "Optimizes VU flag calculations for a useful speedup with high compatibility. Disable it only when diagnosing VU graphics or calculation errors in a specific game."},
+  {"EmuCore/Patches/XGKickSkip", "Performance patch (3668 only)",
+   "Changes DMA timing in Classic 3668 to reduce emulation work. May cause missing graphics or hangs. Off by default; applies on the next launch."},
   {"EmuCore/GS/SyncToHostRefreshRate", "Frame pacing",
    "Slightly adjusts emulation speed so the guest refresh aligns with the Switch display. This can make animation smoother, but it only applies when the rates are already close and may change speed by less than one percent."},
   {"EmuCore/EnablePatches", "Game compatibility",
@@ -4385,6 +4388,8 @@ static int choiceIdx(const Opt &o) {
 }
 static bool optEnabled(const Opt &o) {
   if(o.type==OT_STATUS) return true;
+  if(o.key && !strcmp(o.key,"EmuCore/Patches/XGKickSkip") &&
+     strcmp(iniGet("Wrapper/CoreBuild","4248"),"3668")) return false;
   if(o.key && !strcmp(o.key,"EmuCore/GS/DisableThreadedPresentation") &&
      !strcmp(iniGet("EmuCore/GS/Renderer","14"),"15")) return false;
   if(o.key && !strncmp(o.key,"Wrapper/LSFG",12) && !lsfgDllInstalled())

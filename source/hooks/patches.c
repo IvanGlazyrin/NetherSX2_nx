@@ -11,6 +11,7 @@
 #include "../util.h"
 #include "../hooks.h"
 #include "../so_util.h"
+#include "../prefs.h"
 
 extern so_module emu_mod; // libemucore.so (defined in main.c)
 
@@ -173,6 +174,23 @@ static int in_range(uint32_t off, uint32_t sz) {
   return (uint64_t)off + sz <= (uint64_t)emu_mod.load_size;
 }
 
+static void patch_xgkick_skip(void) {
+  if (!core_is_3668() || !prefs_get_bool("EmuCore/Patches/XGKickSkip", false) ||
+      prefs_get_bool("Wrapper/BootBIOS", false) ||
+      !in_range(0x3cfa98, 4) || !in_range(0x3cfad8, 4))
+    return;
+
+  volatile uint32_t *first =
+      (volatile uint32_t *)((uintptr_t)emu_mod.load_base + 0x3cfa98);
+  volatile uint32_t *second =
+      (volatile uint32_t *)((uintptr_t)emu_mod.load_base + 0x3cfad8);
+  if (*first != 0x14000012 || *second != 0x140001d7)
+    return;
+
+  *first = INSN_NOP;
+  *second = INSN_NOP;
+}
+
 static uint32_t a64_branch(uint32_t from, uint32_t to) {
   return 0x14000000u | (((to - from) >> 2) & 0x03ffffffu);
 }
@@ -259,6 +277,7 @@ void patch_game(void) {
     *p = pt->insn;
   }
 
+  patch_xgkick_skip();
   patch_quick_menu_center();
 
   if (!in_range((uint32_t)g_reqstop_slot, 8))
