@@ -40,6 +40,7 @@
 #include "hooks.h"
 #include "aaudio.h"
 #include "dl_emu.h"
+#include "network.h"
 #include "hooks/vk.h"   // Vulkan (NVK) bridge decls -- empty unless -DUSE_VULKAN
 
 // crt/newlib-provided symbols forwarded by address
@@ -133,8 +134,6 @@ static int ioctl_fake(int fd, unsigned long req, ...) {
 // identical to the old offline stub -- so a networking-disabled boot is
 // unchanged. socket fds are small ints and never collide with the ashmem base
 // (0x40000000) used by the VTLB, so they share the fd namespace safely.
-volatile int g_net_ready = 0;
-
 #define NET_GUARD do { if (!g_net_ready) { errno = ENETDOWN; return -1; } } while (0)
 
 static int     net_socket(int a,int b,int c){ NET_GUARD; return socket(a,b,c); }
@@ -149,12 +148,6 @@ static int     net_getsockopt(int f,int lv,int o,void*v,socklen_t*l){ NET_GUARD;
 static int     net_getsockname(int f,struct sockaddr*a,socklen_t*l){ NET_GUARD; return getsockname(f,a,l); }
 static int     net_shutdown(int f,int h){ NET_GUARD; return shutdown(f,h); }
 static int     net_getaddrinfo(const char*n,const char*s,const struct addrinfo*h,struct addrinfo**r){ if(!g_net_ready) return EAI_FAIL; return getaddrinfo(n,s,h,r); }
-
-// libnx exports no getifaddrs; the Sockets relay only uses it to enumerate host
-// adapters and tolerates an empty list, so hand back "no interfaces".
-struct ifaddrs;
-static int  net_getifaddrs(struct ifaddrs** ifap){ if(ifap) *ifap = NULL; return 0; }
-static void net_freeifaddrs(struct ifaddrs* ifa){ (void)ifa; }
 
 // The core is FORTIFY-built, so FD_SET/FD_ISSET expand to these _chk helpers;
 // route them to a plain byte-addressed fd bitmap (matches the little-endian

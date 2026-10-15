@@ -34,6 +34,7 @@
 #include "CheatManager.h"
 #include "ra_http.h"
 #include "lsfg_control.h"
+#include "network.h"
 
 // Android MotionEvent axis codes (handleControllerAxisEvent expects these)
 #define AAXIS_X         0
@@ -359,8 +360,6 @@ static void *make_input_devices(int count) {
   return arr;
 }
 
-extern volatile int g_net_ready;  // imports.c -- gates the DEV9 socket shims
-
 static bool ensure_network_ready(void) {
   if (g_net_ready) return true;
   if (R_FAILED(socketInitializeDefault())) return false;
@@ -374,7 +373,7 @@ static void apply_network_settings(void) {
   if (on && !ensure_network_ready()) on = 0;
   prefs_set_string("DEV9/Eth/EthEnable",     on ? "true" : "false");
   prefs_set_string("DEV9/Eth/EthApi",        "Sockets");
-  prefs_set_string("DEV9/Eth/EthDevice",     "");
+  prefs_set_string("DEV9/Eth/EthDevice",     "Auto");
   prefs_set_string("DEV9/Eth/InterceptDHCP", "true");
   prefs_set_string("DEV9/Eth/ModeDNS1",      "Auto");
   prefs_set_string("DEV9/Eth/ModeDNS2",      "Auto");
@@ -428,7 +427,6 @@ static void run_startup_sequence(void) {
   prefs_set_int("EmuCore/GS/CropBottom", 0);
   prefs_set_int("EmuCore/GS/StretchY", 100);
   apply_network_settings();
-  // Core logging off: the EE/IOP console formats a lot of strings per frame.
   prefs_set_string("Logging/EnableSystemConsole", "0");
   prefs_set_string("Logging/EnableFileLogging", "0");
   prefs_set_string("Logging/EnableVerbose", "0");
