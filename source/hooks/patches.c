@@ -202,40 +202,59 @@ static uint32_t a64_adrp(unsigned reg, uint32_t from, uint32_t target) {
          ((uint32_t)((delta >> 2) & 0x7ffff) << 5) | reg;
 }
 
-static void patch_quick_menu_center(void) {
+static void patch_quick_menu_layout(void) {
   typedef struct {
-    uint32_t site;
+    uint32_t center;
+    uint32_t measure;
+    uint32_t draw;
     uint32_t cave;
     uint32_t imgui_io;
-  } CenterPatch;
-  static const CenterPatch patch_4248 = {0x7df77c, 0x88a15c, 0xc6cb5c0};
-  static const CenterPatch patch_3668 = {0x7d4d8c, 0x87e7ec, 0xc6be458};
-  const CenterPatch *patch = core_is_3668() ? &patch_3668 :
-                             g_core_version == CORE_VER_V22N_4248 ? &patch_4248 : NULL;
-  if (!patch || !in_range(patch->site, 4) || !in_range(patch->cave, 84))
+  } QuickMenuPatch;
+  static const QuickMenuPatch patch_4248 = {
+    0x7df77c, 0x7df738, 0x7df820, 0x88a15c, 0xc6cb5c0
+  };
+  static const QuickMenuPatch patch_3668 = {
+    0x7d4d8c, 0x7d4d48, 0x7d4e30, 0x87e7ec, 0xc6be458
+  };
+  const QuickMenuPatch *patch = core_is_3668() ? &patch_3668 :
+      g_core_version == CORE_VER_V22N_4248 ? &patch_4248 : NULL;
+  uint32_t stub[] = {
+    0x2d7327af, 0xaa1e03f0, 0x9400001b, 0x54000161,
+    0,          0,          0xbd401102, 0x1e2b3842,
+    0x1e2c1003, 0x1e23084f, 0xbd401502, 0x1e2e3842,
+    0x1e230849, 0x2d3327af, 0xd65f0200, 0xaa1e03f0,
+    0x9400000d, 0xbd401700, 0x54000061, 0x1e2f3003,
+    0x1e230800, 0xd65f0200, 0xaa1e03f0, 0x94000006,
+    0xbd40170a, 0x54000061, 0x1e2f3003, 0x1e23094a,
+    0xd65f0200, 0x39400348, 0x370000a8, 0x7100a11f,
+    0x54000221, 0x91000748, 0x14000005, 0xf9400748,
+    0xf100511f, 0x54000181, 0xf9400b48, 0xa9402909,
+    0x5800014b, 0xeb0b013f, 0x540000e1, 0x5800012b,
+    0xeb0b015f, 0x54000081, 0xb9401109, 0x180000ea,
+    0x6b0a013f, 0xd65f03c0, 0x6874656e, 0x78737265,
+    0x75715f32, 0x5f6b6369, 0x756e656d,
+  };
+  if (!patch || !in_range(patch->center, 4) ||
+      !in_range(patch->measure, 4) || !in_range(patch->draw, 4) ||
+      !in_range(patch->cave, sizeof(stub)))
     return;
 
-  uint32_t *const site = (uint32_t *)((uintptr_t)emu_mod.load_base + patch->site);
+  uint32_t *const center = (uint32_t *)((uintptr_t)emu_mod.load_base + patch->center);
+  uint32_t *const measure = (uint32_t *)((uintptr_t)emu_mod.load_base + patch->measure);
+  uint32_t *const draw = (uint32_t *)((uintptr_t)emu_mod.load_base + patch->draw);
   uint32_t *const cave = (uint32_t *)((uintptr_t)emu_mod.load_base + patch->cave);
-  if (*site != 0x2d7327afu)
+  if (*center != 0x2d7327afu || *measure != 0xbd401700u || *draw != 0xbd40170au)
     return;
-  for (unsigned i = 0; i < 21; i++)
+  for (unsigned i = 0; i < sizeof(stub) / sizeof(*stub); i++)
     if (cave[i] != 0)
       return;
 
-  uint32_t stub[21] = {
-    0x2d7327af, 0x39400340, 0x7100a01f, 0x540001e1,
-    0xf8401340, 0x580001c1, 0xeb01001f, 0x54000161,
-    0,          0,          0xbd401002, 0x1e2b3842,
-    0x1e2c1003, 0x1e23084f, 0xbd401402, 0x1e2e3842,
-    0x1e230849, 0x2d3327af, 0,          0x6874656e,
-    0x78737265,
-  };
-  stub[8] = a64_adrp(0, patch->cave + 32, patch->imgui_io);
-  stub[9] = 0xf9400000u | (((patch->imgui_io & 0xfff) >> 3) << 10);
-  stub[18] = a64_branch(patch->cave + 72, patch->site + 4);
+  stub[4] = a64_adrp(8, patch->cave + 16, patch->imgui_io);
+  stub[5] = 0xf9400108u | (((patch->imgui_io & 0xfff) >> 3) << 10);
   memcpy(cave, stub, sizeof(stub));
-  *site = a64_branch(patch->site, patch->cave);
+  *center = a64_branch(patch->center, patch->cave) | 0x80000000u;
+  *measure = a64_branch(patch->measure, patch->cave + 0x3c) | 0x80000000u;
+  *draw = a64_branch(patch->draw, patch->cave + 0x58) | 0x80000000u;
 }
 
 static void detect_core_version(void) {
@@ -278,7 +297,7 @@ void patch_game(void) {
   }
 
   patch_xgkick_skip();
-  patch_quick_menu_center();
+  patch_quick_menu_layout();
 
   if (!in_range((uint32_t)g_reqstop_slot, 8))
     return;
