@@ -202,7 +202,8 @@ static bool parse_json_string(const std::string &json, size_t position, std::str
   return false;
 }
 
-static std::vector<std::string> json_data_objects(const std::string &json) {
+static std::vector<std::string> json_data_objects(const std::string &json, bool *complete = nullptr) {
+  if (complete) *complete = false;
   std::vector<std::string> objects;
   size_t data = json.find("\"data\"");
   if (data == std::string::npos) return objects;
@@ -227,7 +228,10 @@ static std::vector<std::string> json_data_objects(const std::string &json) {
         objects.emplace_back(json.substr(start, index - start + 1));
         start = std::string::npos;
       }
-    } else if (value == ']' && depth == 0) break;
+    } else if (value == ']' && depth == 0) {
+      if (complete) *complete = true;
+      break;
+    }
   }
   return objects;
 }
@@ -276,7 +280,8 @@ void griddb_global_exit(void) {
 
 static int status_err(long code) {
   if (code == 401 || code == 403) return GRIDDB_NO_KEY;
-  if (code < 200 || code >= 300) return GRIDDB_NOT_FOUND;
+  if (code == 404) return GRIDDB_NOT_FOUND;
+  if (code < 200 || code >= 300) return GRIDDB_ERROR;
   return GRIDDB_OK;
 }
 
@@ -305,24 +310,30 @@ int griddb_search_games(const std::string &key, const std::string &title,
   return results.empty() ? GRIDDB_NOT_FOUND : GRIDDB_OK;
 }
 
-int griddb_fetch_artworks(const std::string &key, long gameId,
-                          std::vector<GridDbArtwork> &artworks,
+static int fetch_artworks(const std::string &key, long gameId, const char *kind,
+                          const char *dimensions, std::vector<GridDbArtwork> &artworks,
                           const std::atomic_bool *cancel) {
   artworks.clear();
   if (key.empty()) return GRIDDB_NO_KEY;
   if (gameId <= 0) return GRIDDB_NOT_FOUND;
-  char endpoint[320];
+  char endpoint[384];
   snprintf(endpoint, sizeof(endpoint),
-           "https://www.steamgriddb.com/api/v2/grids/game/%ld?dimensions=600x900&types=static&mimes=image/png,image/jpeg",
-           gameId);
+           "https://www.steamgriddb.com/api/v2/%s/game/%ld?types=static&mimes=image/png,image/jpeg&nsfw=false&humor=false&order=score%s%s",
+           kind, gameId, *dimensions ? "&dimensions=" : "", dimensions);
   std::string response;
   long code = 0;
   if (!http_get(endpoint, key, response, &code, cancel))
     return cancel && cancel->load(std::memory_order_acquire) ? GRIDDB_CANCELLED : GRIDDB_NO_NET;
   int error = status_err(code);
   if (error) return error;
+  const size_t success = json_field_value(response, "success"), data = json_field_value(response, "data");
+  bool complete = false;
+  const auto objects = json_data_objects(response, &complete);
+  if (success == std::string::npos || response.compare(success, 4, "true") ||
+      data >= response.size() || response[data] != '[' || !complete)
+    return GRIDDB_ERROR;
   std::unordered_set<std::string> seen;
-  for (const auto &object : json_data_objects(response)) {
+  for (const auto &object : objects) {
     GridDbArtwork artwork;
     long width = 0, height = 0;
     json_object_number(object, "width", width);
@@ -339,21 +350,33 @@ int griddb_fetch_artworks(const std::string &key, long gameId,
   return artworks.empty() ? GRIDDB_NOT_FOUND : GRIDDB_OK;
 }
 
+int griddb_fetch_artworks(const std::string &key, long gameId,
+                          std::vector<GridDbArtwork> &artworks,
+                          const std::atomic_bool *cancel) {
+  return fetch_artworks(key, gameId, "grids", "600x900", artworks, cancel);
+}
+
 int griddb_download_image(const std::string &url, const std::string &outPath,
                           const std::atomic_bool *cancel) {
   if (cancel && cancel->load(std::memory_order_acquire)) return GRIDDB_CANCELLED;
   const bool downloaded=!url.empty() && http_download(url, outPath, cancel);
+  if(downloaded) return GRIDDB_OK;
   if(cancel && cancel->load(std::memory_order_acquire)) return GRIDDB_CANCELLED;
-  return downloaded ? GRIDDB_OK : GRIDDB_ERROR;
+  return GRIDDB_ERROR;
 }
 
-int griddb_fetch_cover(const std::string &key, const std::string &title,
-                       const std::string &outPath, const std::atomic_bool *cancel) {
-  std::vector<GridDbGameResult> games;
-  int result = griddb_search_games(key, title, games, cancel);
-  if (result != GRIDDB_OK) return result;
+int griddb_fetch_backgrounds(const std::string &key, long gameId,
+                             std::vector<GridDbArtwork> &artworks, const std::atomic_bool *cancel) {
+  int result = fetch_artworks(key, gameId, "heroes", "", artworks, cancel);
+  if (result == GRIDDB_NOT_FOUND)
+    result = fetch_artworks(key, gameId, "grids", "920x430,460x215", artworks, cancel);
+  return result;
+}
+
+int griddb_fetch_background(const std::string &key, long gameId,
+                            const std::string &outPath, const std::atomic_bool *cancel) {
   std::vector<GridDbArtwork> artworks;
-  result = griddb_fetch_artworks(key, games.front().id, artworks, cancel);
+  int result = griddb_fetch_backgrounds(key, gameId, artworks, cancel);
   if (result != GRIDDB_OK) return result;
   return griddb_download_image(artworks.front().url, outPath, cancel);
 }

@@ -17,7 +17,15 @@ launch. An SDL cover-art launcher chooses the game, the renderer, and per-game
 settings, then chainloads the emulator.
 
 The launcher supports multiple library folders across SD, USB mass storage
-(FAT32, exFAT, NTFS), and SMB shares.
+(FAT32, exFAT, NTFS), and SMB shares. The Recent, All games, and Favorites tabs
+organize the library; press **Y** for a game's menu and use the settings icon
+for global options.
+
+The PS2 theme uses an animated background. Classic keeps the same menu colors
+and displays the selected game's artwork behind the library. SteamGridDB cover
+downloads let you choose a cover and then an optional background. **Settings >
+Library & storage > Download covers** automatically downloads missing covers and
+backgrounds while keeping existing local artwork.
 
 **L + R + Plus** to open the quick menu for save states, controller rebinding,
 selectable per-game PNACH cheat codes, RetroAchievements progress,
@@ -40,7 +48,7 @@ The launcher creates the rest of the folder tree on first run:
   .emu/         <- extracted when selected
   bios/         <- your PS2 BIOS dump           (you supply)
   resources/    <- shaders / GameIndex / fonts  (auto-extracted per core)
-  covers/       <- cover art (<game-key>.png)
+  covers/       <- cached covers and background artwork
   gamecfg/      <- per-game launcher settings
   lsfg/         <- optional user-supplied Lossless.dll
   forwarders/   <- HOME shortcut launch records
@@ -116,6 +124,8 @@ built as an independent emulator NRO and bundled alongside the existing backends
 * TheOfficialFloW for the original Android so-loader lineage.
 * Dantiicu for Switch Vulkan driver.
 * Slluxx for IconGrabber.
+* [Autorun](https://github.com/autorunhq/autorun) for the launcher design reference
+  and sliders settings icon.
 * devkitPro and fincs for Deko3D and UAM.
 * Dolphin-NX, the Dolphin Emulator Project, and PalindromicBreadLoaf for the
   runtime UAM integration and portable native LSFG library adapted here.
@@ -137,3 +147,5 @@ Unless noted otherwise, the source in this repository is under the MIT License
 GPL-3.0-or-later. The native LSFG library under `third_party/lsfg-deko3d` is also
 GPL-3.0-or-later, and its adapted UAM bridge/build integration under
 `source/deko3d/compiler` is GPL-2.0-or-later. Their original notices are preserved.
+The sliders settings icon from Autorun is LGPL-2.1-or-later; its notice and license are included in
+`launcher/romfs/icons/`.

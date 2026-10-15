@@ -44,7 +44,8 @@
 // SDL uses Xbox button names.
 #define BTN_CONFIRM  SDL_CONTROLLER_BUTTON_B
 #define BTN_CANCEL   SDL_CONTROLLER_BUTTON_A
-#define BTN_SETTINGS SDL_CONTROLLER_BUTTON_Y
+#define BTN_X        SDL_CONTROLLER_BUTTON_Y
+#define BTN_Y        SDL_CONTROLLER_BUTTON_X
 
 static const char *DATA_DIR    = "sdmc:/switch/nethersx2";
 static const char *LAUNCHER_INI= "sdmc:/switch/nethersx2/launcher.ini";
@@ -171,6 +172,13 @@ static int allowedCpuCores() {
 static bool lsfgDllInstalled() {
 
   return regularFileExists(LSFG_DLL_FILE);
+}
+
+static bool normalizeLauncherTheme(Store &values){
+  const char *theme=storeGet(values,"Wrapper/Theme","animated");
+  if(!strcmp(theme,"animated")||!strcmp(theme,"classic")) return false;
+  storeSet(values,"Wrapper/Theme","animated");
+  return true;
 }
 
 static bool normalizeLsfgStore(Store &store) {
@@ -366,7 +374,6 @@ struct Opt {
 #define O_SUB(l,scr)           { l, nullptr, OT_SUBMENU, nullptr,0, 0,0,0, nullptr, scr, nullptr, nullptr, 1, nullptr }
 #define O_CHOICEG(l,k,c,d,gk,go) { l, k, OT_CHOICE, c, (int)(sizeof(c)/sizeof(*c)), 0,0,0, d, 0, gk, go, 1, nullptr }
 #define O_RANGEG(l,k,lo,hi,s,d,gk,go) { l, k, OT_RANGE, nullptr,0, lo,hi,s, d, 0, gk, go, 1, nullptr }
-#define O_TEXT(l,k,d)          { l, k, OT_TEXT, nullptr,0, 0,0,0, d, 0, nullptr, nullptr, 1, nullptr }
 #define O_TEXTG(l,k,d,gk,go)   { l, k, OT_TEXT, nullptr,0, 0,0,0, d, 0, gk, go, 1, nullptr }
 #define O_HOTKEY(l,k,d)        { l, k, OT_HOTKEY, nullptr,0, 0,0,0, d, 0, nullptr, nullptr, 1, nullptr }
 #define O_STATUS(l)            { l, nullptr, OT_STATUS, nullptr,0, 0,0,0, nullptr, 0, nullptr, nullptr, 1, nullptr }
@@ -416,8 +423,7 @@ static const Choice C_launcherLanguage[] = {
   {"Deutsch", "de"}, {"Español", "es"}, {"Italiano", "it"}, {"Português", "pt"},
   {"简体中文", "zh-Hans"}, {"繁體中文", "zh-Hant"}
 };
-static const Choice C_launcherTheme[] = { {"XMB (PS3)","xmb"}, {"Glow","animated"}, {"Bubbles","homebrew"},
-                                          {"Classic","classic"}, {"OLED black","oled"} };
+static const Choice C_launcherTheme[] = { {"PS2","animated"}, {"Classic","classic"} };
 static const Choice C_gridColumns[] = { {"3","3"}, {"4","4"}, {"5","5"}, {"6","6"}, {"7","7"}, {"8","8"} };
 static const Choice C_gridRows[] = { {"1","1"}, {"2","2"}, {"3","3"} };
 
@@ -895,7 +901,7 @@ static void commitAll() {
 static SDL_Window   *g_win = nullptr;
 static SDL_Renderer *g_ren = nullptr;
 static TTF_Font     *g_font = nullptr, *g_font_sm = nullptr, *g_font_big = nullptr,
-                    *g_font_caption = nullptr;
+                    *g_font_caption = nullptr, *g_font_hint = nullptr;
 static PlSharedFontType g_loadedFontType = PlSharedFontType_Total;
 static SDL_Texture  *g_logo = nullptr;
 // The UI is laid out in a fixed 1280x720 logical space; SDL scales it to the
@@ -932,8 +938,8 @@ static std::string g_updateNoticeTag;
 static std::string g_updateNotifiedTag;
 static Uint32 g_updateNoticeUntil = 0;
 
-enum class LauncherTheme { Xmb, Glow, Bubbles, Classic, Oled };
-static LauncherTheme g_launcherTheme = LauncherTheme::Glow;
+enum class LauncherTheme { PS2, Classic };
+static LauncherTheme g_launcherTheme = LauncherTheme::PS2;
 static bool g_uiAnimations = true;
 static bool g_showGameTitles = true;
 static bool g_showRegionFlags = true;
@@ -945,7 +951,7 @@ static SDL_Texture *g_roundTexture = nullptr;
 // Footer hit rects live here (not next to drawFooterHints) so clearUiBackground()
 // can drop them at the top of every frame: a screen that draws no footer of its
 // own must never inherit the previous screen's tap targets.
-static SDL_Rect g_footHit[10]; static int g_footAct[10],g_footButton[10]; static int g_footN=0;
+static SDL_Rect g_footHit[10]; static int g_footButton[10]; static int g_footN=0;
 static float g_hy = -1;
 static Uint32 g_fxT = 0;
 
@@ -1099,7 +1105,7 @@ static bool reloadLauncherFonts()
   if (!g_plReady || !g_ttfReady) return false;
   const PlSharedFontType requestedType = launcherFontType();
   if (g_loadedFontType == requestedType && g_font_sm && g_font && g_font_big &&
-      g_font_caption && g_fontScale == g_uiScale)
+      g_font_caption && g_font_hint && g_fontScale == g_uiScale)
     return true;
 
   PlFontData fontData{};
@@ -1117,12 +1123,14 @@ static bool reloadLauncherFonts()
   TTF_Font* normal = openFont(26);
   TTF_Font* large = openFont(32);
   TTF_Font* caption = openFont(14);
-  if (!small || !normal || !large || !caption)
+  TTF_Font* hint = openFont(18);
+  if (!small || !normal || !large || !caption || !hint)
   {
     if (small) TTF_CloseFont(small);
     if (normal) TTF_CloseFont(normal);
     if (large) TTF_CloseFont(large);
     if (caption) TTF_CloseFont(caption);
+    if (hint) TTF_CloseFont(hint);
     return false;
   }
 
@@ -1131,11 +1139,13 @@ static bool reloadLauncherFonts()
   if (g_font) TTF_CloseFont(g_font);
   if (g_font_big) TTF_CloseFont(g_font_big);
   if (g_font_caption) TTF_CloseFont(g_font_caption);
+  if (g_font_hint) TTF_CloseFont(g_font_hint);
   g_fontScale = g_uiScale;
   g_font_sm = small;
   g_font = normal;
   g_font_big = large;
   g_font_caption = caption;
+  g_font_hint = hint;
   g_loadedFontType = requestedType;
   return true;
 }
@@ -1172,10 +1182,8 @@ static bool setLauncherLanguage(std::string_view preference)
 static void applyLauncherAppearance() {
   LauncherTheme previous = g_launcherTheme;
   const char *theme = storeGet(g_global, "Wrapper/Theme", "animated");
-  g_launcherTheme = !strcmp(theme, "classic") ? LauncherTheme::Classic :
-                    !strcmp(theme, "oled") ? LauncherTheme::Oled :
-                    !strcmp(theme, "homebrew") ? LauncherTheme::Bubbles :
-                    !strcmp(theme, "xmb") ? LauncherTheme::Xmb : LauncherTheme::Glow;
+  g_launcherTheme = !strcmp(theme, "classic") ? LauncherTheme::Classic : LauncherTheme::PS2;
+  normalizeLauncherTheme(g_global);
   g_uiAnimations = strcmp(storeGet(g_global, "Wrapper/UiAnimations", "true"), "false") != 0;
   g_showGameTitles = strcmp(storeGet(g_global, "Wrapper/ShowGameTitles", "true"), "false") != 0;
   g_showRegionFlags = strcmp(storeGet(g_global, "Wrapper/ShowRegionFlags", "true"), "false") != 0;
@@ -1184,29 +1192,9 @@ static void applyLauncherAppearance() {
   g_gridColumns = std::max(3, std::min(8, atoi(storeGet(g_global, "Wrapper/GridColumns", "6"))));
   g_gridRows = std::max(1, std::min(3, atoi(storeGet(g_global, "Wrapper/GridRows", "2"))));
 
-  // COL_PANEL and COL_FOCUS are opaque in every theme: translucent panels
-  // double-blended into the animated backgrounds and read as muddy.
-  if (g_launcherTheme == LauncherTheme::Xmb) {
-    COL_BG={8,51,104,255}; COL_TXT={242,247,255,255}; COL_DIM={180,204,227,255};
-    COL_HI={137,225,255,255}; COL_VAL={245,252,255,255}; COL_SEL={118,213,255,255};
-    COL_PANEL={10,43,81,255}; COL_CARD={12,48,85,255}; COL_FOCUS={22,75,119,255};
-  } else if (g_launcherTheme == LauncherTheme::Classic) {
-    COL_BG={22,24,30,255}; COL_TXT={228,230,235,255}; COL_DIM={150,155,165,255};
-    COL_HI={96,200,255,255}; COL_VAL={255,210,100,255}; COL_SEL={255,170,0,255};
-    COL_PANEL={28,31,40,255}; COL_CARD={24,26,34,255}; COL_FOCUS={66,56,30,255};
-  } else if (g_launcherTheme == LauncherTheme::Oled) {
-    COL_BG={0,0,0,255}; COL_TXT={245,247,249,255}; COL_DIM={145,151,158,255};
-    COL_HI={105,220,255,255}; COL_VAL={255,255,255,255}; COL_SEL={0,210,190,255};
-    COL_PANEL={4,4,5,255}; COL_CARD={8,8,10,250}; COL_FOCUS={0,58,53,255};
-  } else if (g_launcherTheme == LauncherTheme::Bubbles) {
-    COL_BG={0,8,16,255}; COL_TXT={235,248,255,255}; COL_DIM={143,192,216,255};
-    COL_HI={118,222,255,255}; COL_VAL={194,239,255,255}; COL_SEL={61,183,235,255};
-    COL_PANEL={4,31,50,255}; COL_CARD={5,35,56,218}; COL_FOCUS={12,76,108,255};
-  } else {
-    COL_BG={8,12,24,255}; COL_TXT={235,239,247,255}; COL_DIM={151,163,184,255};
-    COL_HI={100,211,255,255}; COL_VAL={255,215,120,255}; COL_SEL={116,200,255,255};
-    COL_PANEL={16,23,39,255}; COL_CARD={22,30,49,214}; COL_FOCUS={28,69,92,255};
-  }
+  COL_BG={8,12,24,255}; COL_TXT={235,239,247,255}; COL_DIM={151,163,184,255};
+  COL_HI={100,211,255,255}; COL_VAL={255,215,120,255}; COL_SEL={116,200,255,255};
+  COL_PANEL={16,23,39,255}; COL_CARD={22,30,49,214}; COL_FOCUS={28,69,92,255};
   if (previous != g_launcherTheme && g_ren)
     clearTextCaches();
 }
@@ -1235,7 +1223,7 @@ static void ensureGlowTexture() {
 }
 
 static bool hasAnimatedBackground() {
-  return g_launcherTheme==LauncherTheme::Xmb||g_launcherTheme==LauncherTheme::Bubbles||g_launcherTheme==LauncherTheme::Glow;
+  return g_launcherTheme==LauncherTheme::PS2;
 }
 
 static void drawGlow(float x,float y,float radius,Uint8 red,Uint8 green,Uint8 blue,Uint8 alpha) {
@@ -1257,167 +1245,6 @@ static void drawBackgroundParticles(float time,SDL_Color color,int count,float s
   }
 }
 
-static Uint8 blendChannel(Uint8 first,Uint8 second,float amount) {
-  return (Uint8)(first+(second-first)*std::clamp(amount,0.f,1.f));
-}
-
-static float xmbWaveY(float x,float time,float center,float amplitude,float frequency,float slope,float phase) {
-  const float primary=sinf(x*6.2831853f*frequency+phase+time*0.115f);
-  const float detail=sinf(x*6.2831853f*(frequency*2.07f)+phase*0.61f-time*0.072f);
-  return center+slope*(x-0.5f)+amplitude*(primary+detail*0.24f);
-}
-
-static void drawXmbRibbon(float time,float center,float amplitude,float frequency,float slope,float phase,
-                          int halfWidth,SDL_Color color) {
-  constexpr int pointCount=121;
-  std::array<SDL_Point,pointCount> base{},points{};
-  for(int point=0;point<pointCount;point++){
-    const float x=(float)point/(pointCount-1);
-    base[point]={(int)(x*SW),(int)(xmbWaveY(x,time,center,amplitude,frequency,slope,phase)*SH)};
-  }
-  for(int offset=-halfWidth;offset<=halfWidth;offset++){
-    float distance=halfWidth?fabsf((float)offset/halfWidth):0.f;
-    Uint8 alpha=(Uint8)(color.a*powf(std::max(0.f,1.f-distance),1.45f));
-    if(alpha<2) continue;
-    for(int point=0;point<pointCount;point++) points[point]={base[point].x,base[point].y+offset};
-    SDL_SetRenderDrawColor(g_ren,color.r,color.g,color.b,alpha);
-    SDL_RenderDrawLines(g_ren,points.data(),pointCount);
-  }
-}
-
-static void drawXmbFilament(float time,float center,float amplitude,float frequency,float slope,float phase,
-                            SDL_Color color) {
-  constexpr int pointCount=161;
-  std::array<SDL_Point,pointCount> points{};
-  for(int point=0;point<pointCount;point++){
-    float x=(float)point/(pointCount-1);
-    points[point]={(int)(x*SW),(int)(xmbWaveY(x,time,center,amplitude,frequency,slope,phase)*SH)};
-  }
-  SDL_SetRenderDrawColor(g_ren,color.r,color.g,color.b,color.a);
-  SDL_RenderDrawLines(g_ren,points.data(),pointCount);
-}
-
-static void drawXmbSparkles(float time) {
-  for(int index=0;index<42;index++){
-    float x=fmodf(index*0.618034f+time*(0.0022f+(index%5)*0.00045f),1.08f)-0.04f;
-    float y=xmbWaveY(x,time,0.585f,0.095f,0.91f,0.075f,0.4f)+
-            (fmodf(index*0.413f,1.f)-0.5f)*0.31f;
-    float pulse=0.5f+0.5f*sinf(time*(0.55f+(index%7)*0.08f)+index*1.731f);
-    Uint8 alpha=(Uint8)(28.f+pulse*(index%9==0?142.f:82.f));
-    int px=(int)(x*SW),py=(int)(y*SH);
-    fillRect(px,py,index%9==0?3:2,index%9==0?3:2,(SDL_Color){220,246,255,alpha});
-    if(index%9==0&&pulse>0.55f){
-      SDL_SetRenderDrawColor(g_ren,235,251,255,(Uint8)(alpha*0.62f));
-      SDL_RenderDrawLine(g_ren,px-5,py+1,px+7,py+1);
-      SDL_RenderDrawLine(g_ren,px+1,py-5,px+1,py+7);
-    }
-  }
-}
-
-static void drawXmbBackground(float time) {
-  const SDL_Color top={8,51,104,255},middle={12,82,139,255},bottom={6,39,82,255};
-  constexpr int bands=72;
-  for(int band=0;band<bands;band++){
-    float y=(band+0.5f)/bands;
-    SDL_Color color{};
-    if(y<0.52f){
-      float amount=y/0.52f;
-      color={blendChannel(top.r,middle.r,amount),blendChannel(top.g,middle.g,amount),blendChannel(top.b,middle.b,amount),255};
-    } else {
-      float amount=(y-0.52f)/0.48f;
-      color={blendChannel(middle.r,bottom.r,amount),blendChannel(middle.g,bottom.g,amount),blendChannel(middle.b,bottom.b,amount),255};
-    }
-    int y0=band*SH/bands,y1=(band+1)*SH/bands;
-    fillRect(0,y0,SW,y1-y0,color);
-  }
-  if(g_glowTexture){
-    drawGlow(0.10f,0.43f,1.18f,55,157,255,32);
-    drawGlow(0.84f,0.38f,0.92f,41,112,228,24);
-  }
-  drawXmbRibbon(time,0.655f,0.082f,0.78f,-0.105f,2.15f,std::max(12,SH/18),(SDL_Color){63,166,255,31});
-  drawXmbRibbon(time,0.575f,0.074f,0.96f,0.080f,0.35f,std::max(10,SH/25),(SDL_Color){189,235,255,26});
-  drawXmbRibbon(time,0.605f,0.049f,1.28f,-0.025f,3.82f,std::max(5,SH/54),(SDL_Color){230,250,255,36});
-  for(int trace=0;trace<9;trace++){
-    float offset=(trace-4)*0.009f;
-    drawXmbFilament(time,0.588f+offset,0.083f+trace*0.0017f,0.91f,0.052f,
-                    0.62f+trace*0.19f,(SDL_Color){202,241,255,(Uint8)(18+trace%3*8)});
-  }
-  drawXmbFilament(time,0.578f,0.073f,0.96f,0.080f,0.35f,(SDL_Color){243,253,255,136});
-  drawXmbSparkles(time);
-}
-
-static void drawBubble(int centerX,int centerY,int radius,Uint8 alpha) {
-  if(radius<3||alpha==0) return;
-  if(g_glowTexture){
-    SDL_SetTextureColorMod(g_glowTexture,90,205,255);
-    SDL_SetTextureAlphaMod(g_glowTexture,(Uint8)(alpha/5));
-    SDL_Rect glow={centerX-radius*2,centerY-radius*2,radius*4,radius*4};
-    SDL_RenderCopy(g_ren,g_glowTexture,nullptr,&glow);
-  }
-  const int segments=24;
-  SDL_SetRenderDrawColor(g_ren,124,220,255,alpha);
-  std::array<SDL_Point,segments+1> outer{},inner{};
-  for(int segment=0;segment<=segments;segment++){
-    float angle=segment*6.2831853f/segments;
-    float x=cosf(angle),y=sinf(angle);
-    outer[segment]={centerX+(int)(x*radius),centerY+(int)(y*radius)};
-    inner[segment]={centerX+(int)(x*(radius-1)),centerY+(int)(y*(radius-1))};
-  }
-  SDL_RenderDrawLines(g_ren,outer.data(),(int)outer.size());
-  SDL_RenderDrawLines(g_ren,inner.data(),(int)inner.size());
-  SDL_SetRenderDrawColor(g_ren,235,252,255,(Uint8)std::min(255,(int)alpha+55));
-  std::array<SDL_Point,6> highlight{};
-  for(int segment=0;segment<(int)highlight.size();segment++){
-    float angle=3.55f+segment*0.13f;
-    highlight[segment]={centerX+(int)(cosf(angle)*radius),centerY+(int)(sinf(angle)*radius)};
-  }
-  SDL_RenderDrawLines(g_ren,highlight.data(),(int)highlight.size());
-}
-
-static void drawBubblesBackground(float time) {
-  const SDL_Color top={20,126,169,255},middle={4,54,82,255},bottom={0,5,11,255};
-  constexpr int bands=56;
-  for(int band=0;band<bands;band++){
-    float y=(band+0.5f)/bands;
-    SDL_Color color{};
-    if(y<0.58f){
-      float amount=y/0.58f;
-      color={blendChannel(top.r,middle.r,amount),blendChannel(top.g,middle.g,amount),blendChannel(top.b,middle.b,amount),255};
-    } else {
-      float amount=(y-0.58f)/0.42f;
-      color={blendChannel(middle.r,bottom.r,amount),blendChannel(middle.g,bottom.g,amount),blendChannel(middle.b,bottom.b,amount),255};
-    }
-    int y0=band*SH/bands,y1=(band+1)*SH/bands;
-    fillRect(0,y0,SW,y1-y0,color);
-  }
-
-  if(g_glowTexture){
-    SDL_SetTextureColorMod(g_glowTexture,118,225,255);
-    SDL_SetTextureAlphaMod(g_glowTexture,105);
-    SDL_Rect surface={-SW/6,-SH/3,SW*4/3,SH*2/3};
-    SDL_RenderCopy(g_ren,g_glowTexture,nullptr,&surface);
-    for(int ray=0;ray<7;ray++){
-      float sway=sinf(time*(0.10f+ray*0.013f)+ray*1.31f);
-      int width=SW*(11+(ray%3)*3)/100;
-      int x=SW*(8+ray*14)/100+(int)(sway*SW*0.025f)-width/2;
-      SDL_Rect shaft={x,-SH/3,width,SH*4/3};
-      SDL_SetTextureAlphaMod(g_glowTexture,(Uint8)(23+(ray%3)*7));
-      SDL_RenderCopyEx(g_ren,g_glowTexture,nullptr,&shaft,-9.0+ray*2.7+sway*2.0,nullptr,SDL_FLIP_NONE);
-    }
-  }
-
-  for(int index=0;index<18;index++){
-    float progress=fmodf(index*0.173f+time*(0.038f+(index%5)*0.007f),1.18f);
-    float y=1.08f-progress;
-    float x=0.05f+fmodf(index*0.283f,0.90f)+0.032f*sinf(time*(0.31f+(index%4)*0.04f)+index);
-    float fade=std::min(std::clamp((1.10f-y)*5.f,0.f,1.f),std::clamp((y+0.12f)*6.f,0.f,1.f));
-    int radius=(int)(SH*(0.009f+(index%6)*0.0042f));
-    if(index%11==0) radius=radius*3/2;
-    drawBubble((int)(x*SW),(int)(y*SH),radius,(Uint8)(fade*(85+(index%4)*24)));
-  }
-  drawBackgroundParticles(time,(SDL_Color){164,228,255,62},24,0.008f);
-}
-
 // --- marquee text: per-position, restarts when the text changes, rests 0.9s at
 // each end so a long label is actually readable at a standstill.
 struct TextScroll { std::string text; Uint32 since=0; };
@@ -1436,6 +1263,16 @@ static int textScrollOffset(int x,int y,int span,const char *text){
   return std::max(0,span-(int)((phase-2*pause-travel)*45));
 }
 
+static void drawClassicBackground();
+
+static void drawGradient(const SDL_Rect &rect,SDL_Color first,SDL_Color last,bool horizontal=false){
+  const float x=(float)rect.x,y=(float)rect.y,w=(float)rect.w,h=(float)rect.h;
+  const SDL_Vertex vertices[]={{{x,y},first,{0,0}},{{x+w,y},horizontal?last:first,{0,0}},
+    {{x,y+h},horizontal?first:last,{0,0}},{{x+w,y+h},last,{0,0}}};
+  const int indices[]={0,1,2,2,1,3};
+  SDL_RenderGeometry(g_ren,nullptr,vertices,4,indices,6);
+}
+
 static void clearUiBackground() {
   // Every frame starts with no live footer tap targets; only the screens that
   // actually draw a footer this frame register any.
@@ -1443,19 +1280,9 @@ static void clearUiBackground() {
   SDL_RenderSetClipRect(g_ren,nullptr);
   SDL_SetRenderDrawColor(g_ren,COL_BG.r,COL_BG.g,COL_BG.b,255);
   SDL_RenderClear(g_ren);
-  if(!hasAnimatedBackground()) return;
+  if(g_launcherTheme==LauncherTheme::Classic){ drawClassicBackground(); return; }
   ensureGlowTexture();
   float time=g_uiAnimations?SDL_GetTicks()/1000.f:0.f;
-  if(g_launcherTheme==LauncherTheme::Xmb){
-    drawXmbBackground(time);
-    if(g_glowTexture){ SDL_SetTextureColorMod(g_glowTexture,255,255,255); SDL_SetTextureAlphaMod(g_glowTexture,255); }
-    return;
-  }
-  if(g_launcherTheme==LauncherTheme::Bubbles){
-    drawBubblesBackground(time);
-    if(g_glowTexture){ SDL_SetTextureColorMod(g_glowTexture,255,255,255); SDL_SetTextureAlphaMod(g_glowTexture,255); }
-    return;
-  }
   if(!g_glowTexture) return;
   drawGlow(0.10f+0.13f*sinf(time*0.43f),0.20f+0.11f*cosf(time*0.37f),0.90f,45,140,255,128);
   drawGlow(0.84f+0.12f*cosf(time*0.34f),0.34f+0.10f*sinf(time*0.41f),0.78f,154,75,255,112);
@@ -1617,7 +1444,8 @@ static void drawLocalizedHeader(const char *title,const char *ctx);
 static void drawScrollTextR(TTF_Font *font,int xRight,int y,int maxWidth,const char *text,SDL_Color color);
 static void drawScrollTextL(TTF_Font *font,int x,int y,int maxWidth,const char *text,SDL_Color color);
 static void drawWrapped(TTF_Font *font,int x,int y,int maxWidth,int lineHeight,int maxLines,const char *text,SDL_Color color);
-static SDL_Texture *loadScaledTexture(const std::string &path,int width,int height);
+static void drawWrappedCentered(TTF_Font *font,int centerX,int y,int maxWidth,int lineHeight,int maxLines,const char *text,SDL_Color color);
+static SDL_Texture *loadScaledTexture(const std::string &path,int width,int height,bool preserveAspect=false);
 static bool g_rescanAfterSettings = false;
 
 static SDL_Texture *g_flag[4] = { nullptr, nullptr, nullptr, nullptr };
@@ -1653,13 +1481,14 @@ static SDL_Texture *makeFlagTex(int region,int W,int H){
 static void makeFlags(){ g_flag[1]=makeFlagTex(1,36,24); g_flag[2]=makeFlagTex(2,36,24); g_flag[3]=makeFlagTex(3,36,24); }
 
 static SDL_Texture *g_gA=nullptr,*g_gB=nullptr,*g_gX=nullptr,*g_gY=nullptr,
-                   *g_gPlus=nullptr,*g_gMinus=nullptr,*g_gL=nullptr,*g_gR=nullptr,
+                   *g_gPlus=nullptr,
                    *g_gLeftRight=nullptr,*g_gUpDown=nullptr,*g_gTouch=nullptr;
+static SDL_Texture *g_settingsIcon=nullptr;
 // Supersampling keeps the downscaled glyphs crisp.
 static const int GLYPH_SS = 3;
 static SDL_Texture *makeGlyph(const char *label, bool pill){
   if(!g_font_sm || !g_font_big) return nullptr;
-  const int S=GLYPH_SS, base=fontHeight(g_font_sm)+6;
+  const int S=GLYPH_SS, base=26;
   int H=base*S, W=(pill? base*8/5 : base)*S;
   SDL_Texture *t=SDL_CreateTexture(g_ren,SDL_PIXELFORMAT_RGBA8888,SDL_TEXTUREACCESS_TARGET,W,H);
   if(!t) return nullptr;
@@ -1669,18 +1498,8 @@ static SDL_Texture *makeGlyph(const char *label, bool pill){
   SDL_SetRenderTarget(g_ren,t);
   SDL_RenderSetScale(g_ren,1.0f,1.0f);
   SDL_SetRenderDrawColor(g_ren,0,0,0,0); SDL_RenderClear(g_ren);
-  SDL_Color edge={14,16,22,255}, hi={92,99,114,255}, face={52,57,68,255}, ink={246,248,252,255};
-  if(pill){
-    int r=H/2;
-    fillCircle(r,r,r,edge);     fillCircle(W-r,r,r,edge);     fillRect(r,0,W-2*r,H,edge);
-    fillCircle(r,r,r-S,hi);     fillCircle(W-r,r,r-S,hi);     fillRect(r,S,W-2*r,H-2*S,hi);
-    fillCircle(r,r,r-S*2,face); fillCircle(W-r,r,r-S*2,face); fillRect(r,S*2,W-2*r,H-S*4,face);
-  } else {
-    int R=H/2;
-    fillCircle(W/2,H/2,R,edge);
-    fillCircle(W/2,H/2,R-S,hi);
-    fillCircle(W/2,H/2,R-S*2,face);
-  }
+  const SDL_Color face={242,244,246,255},ink={18,20,24,255};
+  roundedRect(0,0,W,H,H/2,face);
   SDL_Surface *sf=TTF_RenderUTF8_Blended(g_font_big,label,ink);
   if(sf){ SDL_Texture *lt=SDL_CreateTextureFromSurface(g_ren,sf);
     if(lt) SDL_SetTextureBlendMode(lt,SDL_BLENDMODE_BLEND);
@@ -1692,17 +1511,17 @@ static SDL_Texture *makeGlyph(const char *label, bool pill){
   SDL_RenderSetScale(g_ren,scaleX,scaleY);
   return t;
 }
+
 static void makeGlyphs(){
   g_gA=makeGlyph("A",false); g_gB=makeGlyph("B",false);
   g_gX=makeGlyph("X",false); g_gY=makeGlyph("Y",false);
-  g_gPlus=makeGlyph("+",false); g_gMinus=makeGlyph("-",false);
-  g_gL=makeGlyph("L",true); g_gR=makeGlyph("R",true);
+  g_gPlus=makeGlyph("+",false);
   g_gLeftRight=makeGlyph("< >",true); g_gUpDown=makeGlyph("^ v",true);
   g_gTouch=makeGlyph("Touch",true);
+  g_settingsIcon=IMG_LoadTexture(g_ren,"romfs:/icons/settings.svg");
 }
 
-enum FootAct { FA_NONE, FA_LAUNCH, FA_SORT, FA_OPTIONS, FA_SETTINGS, FA_FILTER, FA_PAGEL, FA_PAGER, FA_QUIT };
-struct FootItem { const char *button; const char *label; int act; };
+struct FootItem { const char *button; const char *label; };
 
 static SDL_Texture *buttonGlyph(const char *button){
   if(!button) return nullptr;
@@ -1711,9 +1530,6 @@ static SDL_Texture *buttonGlyph(const char *button){
   if(!strcmp(button,"X")) return g_gX;
   if(!strcmp(button,"Y")) return g_gY;
   if(!strcmp(button,"+")) return g_gPlus;
-  if(!strcmp(button,"-")) return g_gMinus;
-  if(!strcmp(button,"L")) return g_gL;
-  if(!strcmp(button,"R")) return g_gR;
   if(!strcmp(button,"Left / Right")) return g_gLeftRight;
   if(!strcmp(button,"Up / Down")) return g_gUpDown;
   if(!strcmp(button,"Touch")) return g_gTouch;
@@ -1727,12 +1543,12 @@ static void buttonHintSize(const char *button,int &width,int &height){
     SDL_QueryTexture(glyph,nullptr,nullptr,&width,&height);
     width/=GLYPH_SS; height/=GLYPH_SS;
   } else if(button&&button[0]) {
-    width=textW(g_font_sm,button)+14;
-    height=fontHeight(g_font_sm)+6;
+    width=textW(g_font_hint,button)+14;
+    height=fontHeight(g_font_hint)+6;
   }
 }
 
-static void drawButtonHint(int x,int cy,const char *button,const char *label,SDL_Color color=COL_DIM){
+static void drawButtonGlyph(int x,int cy,const char *button){
   SDL_Texture *glyph=buttonGlyph(button);
   int width=0,height=0; buttonHintSize(button,width,height);
   if(glyph){
@@ -1740,15 +1556,8 @@ static void drawButtonHint(int x,int cy,const char *button,const char *label,SDL
     SDL_RenderCopy(g_ren,glyph,nullptr,&destination);
   } else if(button&&button[0]) {
     roundedPanel(x,cy-height/2,width,height,COL_CARD,COL_DIM,height/2);
-    drawTextC(g_font_sm,x+width/2,cy-fontHeight(g_font_sm)/2,button,COL_TXT);
+    drawTextC(g_font_hint,x+width/2,cy-fontHeight(g_font_hint)/2,button,COL_TXT);
   }
-  if(label&&label[0]) drawText(g_font_sm,x+width+8,cy-fontHeight(g_font_sm)/2,label,color);
-}
-
-[[maybe_unused]] static void drawButtonHintCentered(int cx,int cy,const char *button,const char *label,SDL_Color color=COL_DIM){
-  int width=0,height=0; buttonHintSize(button,width,height);
-  const int labelWidth=label&&label[0]?8+textW(g_font_sm,label):0;
-  drawButtonHint(cx-(width+labelWidth)/2,cy,button,label,color);
 }
 
 static std::string g_toastMessage;
@@ -1787,11 +1596,11 @@ struct FooterLayout {
 static FooterLayout measureFooter(const FootItem *it,int n){
   FooterLayout result;
   const int gap=8,pairGap=26,glyphGap=16;
-  const int fh=fontHeight(g_font_sm),maxWidth=std::max(80,SW-24);
+  const int fh=fontHeight(g_font_hint),maxWidth=std::max(80,SW-160);
   for(int i=0;i<n&&i<10;i++){
     int gw=0,gh=0; buttonHintSize(it[i].button,gw,gh);
     const bool label=it[i].label&&it[i].label[0];
-    result.itemWidth[i]=gw+(label?gap+textW(g_font_sm,tr(it[i].label)):0);
+    result.itemWidth[i]=gw+(label?gap+textW(g_font_hint,tr(it[i].label)):0);
     result.gapAfter[i]=label?pairGap:glyphGap;
   }
   for(int first=0;first<n&&first<10;){
@@ -1810,45 +1619,46 @@ static FooterLayout measureFooter(const FootItem *it,int n){
   result.height=(std::max(1,result.rowCount)-1)*result.rowSpacing+fh+32;
   return result;
 }
+static void drawLauncherMark(int cy){
+  if(!g_logo) return;
+  int w=0,h=0; SDL_QueryTexture(g_logo,nullptr,nullptr,&w,&h);
+  if(h<1) return;
+  const SDL_Rect rect{40,cy-48,w*64/h,64};
+  SDL_RenderCopy(g_ren,g_logo,nullptr,&rect);
+}
+
 static void drawFooterHints(const FootItem *it,int n,int cy){
   const FooterLayout layout=measureFooter(it,n);
   const int rowCount=layout.rowCount,rowSpacing=layout.rowSpacing;
-  const int fh=fontHeight(g_font_sm),gap=8;
-  // Only screen-bottom footers get the band; modal panels keep their own card.
-  if(cy>=SH-40){
-    fillRect(0,SH-layout.height,SW,layout.height,COL_PANEL);
-    fillRect(0,SH-layout.height,SW,1,(SDL_Color){255,255,255,18});
-  }
+  const int fh=fontHeight(g_font_hint),gap=8;
+  const bool screenBottom=cy>=SH-64;
+  if(screenBottom) drawLauncherMark(cy);
   g_footN=0;
   for(int row=0;row<rowCount;row++){
     const int rowY=cy-(rowCount-1-row)*rowSpacing;
-    int x=(SW-layout.rowWidth[row])/2;
+    int x=screenBottom?SW-40-layout.rowWidth[row]:(SW-layout.rowWidth[row])/2;
     for(int i=layout.rowStart[row];i<layout.rowEnd[row];i++){
       int gw=0,gh=0; buttonHintSize(it[i].button,gw,gh);
       const int x0=x;
-      drawButtonHint(x,rowY,it[i].button,nullptr);
+      drawButtonGlyph(x,rowY,it[i].button);
       x+=gw;
       const bool label=it[i].label&&it[i].label[0];
       if(label){
         const char *localized=tr(it[i].label);
         x+=gap;
-        drawText(g_font_sm,x,rowY-fh/2,localized,(i==0?COL_TXT:COL_DIM));
-        x+=textW(g_font_sm,localized);
+        drawText(g_font_hint,x,rowY-fh/2,localized,COL_TXT);
+        x+=textW(g_font_hint,localized);
       }
       if(g_footN<10){
         g_footHit[g_footN]={x0-4,rowY-std::max(gh,fh)/2-8,(x-x0)+8,std::max(gh,fh)+16};
-        g_footAct[g_footN]=it[i].act;
         const char *button=it[i].button;
         g_footButton[g_footN]=
           !button?-1:
           !strcmp(button,"A")?BTN_CONFIRM:
           !strcmp(button,"B")?BTN_CANCEL:
-          !strcmp(button,"X")?BTN_SETTINGS:
-          !strcmp(button,"Y")?SDL_CONTROLLER_BUTTON_X:
-          !strcmp(button,"+")?SDL_CONTROLLER_BUTTON_START:
-          !strcmp(button,"-")?SDL_CONTROLLER_BUTTON_BACK:
-          !strcmp(button,"L")?SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
-          !strcmp(button,"R")?SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:-1;
+          !strcmp(button,"X")?BTN_X:
+          !strcmp(button,"Y")?BTN_Y:
+          !strcmp(button,"+")?SDL_CONTROLLER_BUTTON_START:-1;
         g_footN++;
       }
       if(i+1<layout.rowEnd[row]) x+=layout.gapAfter[i];
@@ -1856,10 +1666,8 @@ static void drawFooterHints(const FootItem *it,int n,int cy){
   }
 }
 // Shared by renderGrid (to draw) and gridLayout (to reserve the right height).
-static std::array<FootItem,8> libraryFooter(){
-  return {{{"A","Launch",FA_LAUNCH},{"Y","Sort",FA_SORT},{"X","Settings",FA_SETTINGS},
-    {"+","Game Menu",FA_OPTIONS},{"-","Filter",FA_FILTER},{"L","",FA_PAGEL},
-    {"R","Page",FA_PAGER},{"B","Quit",FA_QUIT}}};
+static std::array<FootItem,3> libraryFooter(){
+  return {{{"A","Launch"},{"Y","Game Menu"},{"B","Quit"}}};
 }
 
 static void drawSettingsFooter(const char *text,int cy=-1){
@@ -1880,15 +1688,11 @@ static void drawSettingsFooter(const char *text,int cy=-1){
   std::vector<FootItem> hints;
   hints.reserve(tokens.size()/2);
   for(size_t index=0;index+1<tokens.size();index+=2)
-    hints.push_back({tokens[index].c_str(),tokens[index+1].c_str(),FA_NONE});
+    hints.push_back({tokens[index].c_str(),tokens[index+1].c_str()});
   if(hints.empty()) drawTextC(g_font_sm,SW/2,cy>=0?cy-fontHeight(g_font_sm)/2:SH-38,text,COL_DIM);
   else drawFooterHints(hints.data(),(int)hints.size(),cy>=0?cy:SH-26);
 }
-static int footTapAct(int px,int py){
-  for(int i=0;i<g_footN;i++){ SDL_Rect &r=g_footHit[i];
-    if(px>=r.x && px<r.x+r.w && py>=r.y && py<r.y+r.h) return g_footAct[i]; }
-  return FA_NONE;
-}
+
 // Every footer hint doubles as a touch target: tapping one synthesises the
 // controller button it stands for, so no screen needs its own tap plumbing.
 static bool pressFooterButton(int x,int y){
@@ -1986,6 +1790,7 @@ static void pumpStick(const SDL_Event &e){
 }
 
 static SDL_GameController *g_pad=nullptr;
+static std::array<bool,2> g_libraryTriggers{};
 static bool g_exitRequested=false;
 static int g_navHeld=0;
 static Uint32 g_navSince=0,g_navLast=0;
@@ -2006,6 +1811,7 @@ static void closeController() {
   SDL_GameControllerClose(g_pad);
   g_pad = nullptr;
   g_stickXLatched = g_stickYLatched = false;
+  g_libraryTriggers={};
   g_navHeld = 0;
   g_navSince = g_navLast = 0;
 }
@@ -2162,15 +1968,25 @@ struct Game {
   Uint64 coverRequest = 0;
   bool coverQueued = false;
   bool triedCover = false;
+  SDL_Texture *background = nullptr;
+  Uint64 backgroundUse = 0;
+  Uint64 backgroundRequest = 0;
+  bool backgroundQueued = false;
+  bool triedBackground = false;
   bool hasCfg = false;
   bool legacyUnique = false;
   bool biosBoot = false;
   int region = 0;
-  long long added = 0;
   long long played = 0;
   uint64_t fileSize = 0;
   long long modified = 0;
 };
+
+static void releaseGameArtwork(Game &game){
+  if(game.cover) SDL_DestroyTexture(game.cover);
+  if(game.background) SDL_DestroyTexture(game.background);
+  game.cover=game.background=nullptr;
+}
 
 struct LibraryIdentityRecord {
   std::string id;
@@ -2181,11 +1997,6 @@ struct LibraryIdentityRecord {
   int cachedRegion = 0;
   uint64_t fileSize = 0;
   long long modified = 0;
-};
-
-struct Collection {
-  std::string name;
-  std::unordered_set<std::string> members;
 };
 
 struct LibraryScanState {
@@ -2206,9 +2017,14 @@ static std::thread g_libraryScanThread;
 static std::vector<std::string> g_pendingScanSources;
 static std::vector<size_t> g_visibleGames;
 static std::unordered_set<std::string> g_favorites;
-static std::vector<Collection> g_collections;
-static std::string g_activeCollection;
-static std::string g_searchQuery;
+enum class LibraryView { Recent, All, Favorites };
+static LibraryView g_libraryView=LibraryView::Recent;
+static bool g_libraryHeaderFocused=false;
+static int g_libraryHeaderSelection=0;
+static std::array<float,3> g_libraryTabOpen{1,0,0};
+static Uint32 g_libraryAnimationTick=0;
+static float g_recentPosition=-1;
+static std::array<std::string,3> g_librarySelections;
 
 static std::string gameCRCFile(const Game &game) {
   return std::string(GAMECRC_DIR) + "/" + game.key + ".ini";
@@ -2244,84 +2060,46 @@ static std::string cheatFileForCRC(uint32_t crc) {
 static std::vector<Game> g_games;
 static Uint64 g_coverUseSerial = 0;
 static constexpr size_t COVER_CACHE_LIMIT = 64;
+static constexpr size_t BACKGROUND_CACHE_LIMIT = 4;
+static std::string g_backgroundTarget,g_backgroundCurrent,g_backgroundPrevious;
+static Uint32 g_backgroundSince=0;
 
-enum { SORT_ALPHA, SORT_RECENT, SORT_ADDED, SORT_COUNT };
 static std::string foldedKey(std::string key);
-static const char *SORT_NAME[SORT_COUNT] = { "A-Z", "Recently played", "Recently added" };
-static int g_sort = SORT_ALPHA;
 static Store g_recent;
 static const char *RECENT_INI = "sdmc:/switch/nethersx2/recent.ini";
 static const char *LIBRARY_INI = "sdmc:/switch/nethersx2/library.ini";
 
-static void loadLibraryOrganization()
-{
+static void loadLibraryOrganization(){
   g_favorites.clear();
-  const int favorites=std::max(0,std::min(4096,atoi(storeGet(g_global,"Library/FavoriteCount","0"))));
-  for(int index=0;index<favorites;index++){
-    const std::string key="Library/Favorite"+std::to_string(index);
-    const char *id=storeGet(g_global,key.c_str(),"");
+  const int count=std::clamp(atoi(storeGet(g_global,"Library/FavoriteCount","0")),0,65536);
+  for(int index=0;index<count;index++){
+    const char *id=storeGet(g_global,("Library/Favorite"+std::to_string(index)).c_str(),"");
     if(*id) g_favorites.insert(id);
   }
-  g_collections.clear();
-  const int count=std::max(0,std::min(128,atoi(storeGet(g_global,"Library/CollectionCount","0"))));
-  for(int index=0;index<count;index++){
-    const std::string prefix="Library/Collection"+std::to_string(index);
-    Collection collection;
-    collection.name=storeGet(g_global,(prefix+"Name").c_str(),"");
-    std::string members=storeGet(g_global,(prefix+"Members").c_str(),"");
-    for(size_t start=0;start<=members.size();){
-      size_t comma=members.find(',',start);
-      std::string id=members.substr(start,comma==std::string::npos?std::string::npos:comma-start);
-      if(!id.empty()) collection.members.insert(std::move(id));
-      if(comma==std::string::npos) break;
-      start=comma+1;
-    }
-    if(!collection.name.empty()) g_collections.push_back(std::move(collection));
-  }
-  // Views are deliberately session-only: every launch starts in All games.
-  g_activeCollection.clear();
-  g_searchQuery.clear();
+  g_libraryView=LibraryView::Recent;
 }
 
-static void saveLibraryOrganization()
-{
+static void saveLibraryOrganization(){
   storeRemovePrefix(g_global,"Library/Favorite");
   storeSet(g_global,"Library/FavoriteCount",std::to_string(g_favorites.size()).c_str());
   size_t index=0;
   for(const auto &id:g_favorites)
     storeSet(g_global,("Library/Favorite"+std::to_string(index++)).c_str(),id.c_str());
-  storeRemovePrefix(g_global,"Library/Collection");
-  storeSet(g_global,"Library/CollectionCount",std::to_string(g_collections.size()).c_str());
-  for(size_t collectionIndex=0;collectionIndex<g_collections.size();collectionIndex++){
-    const std::string prefix="Library/Collection"+std::to_string(collectionIndex);
-    storeSet(g_global,(prefix+"Name").c_str(),g_collections[collectionIndex].name.c_str());
-    std::string members;
-    for(const auto &id:g_collections[collectionIndex].members){ if(!members.empty()) members+=','; members+=id; }
-    storeSet(g_global,(prefix+"Members").c_str(),members.c_str());
-  }
   storeSave(g_global,LAUNCHER_INI);
 }
 
-static void rebuildVisibleGames()
-{
+static void rebuildVisibleGames(){
   g_visibleGames.clear();
-  std::string query=foldedKey(trim(g_searchQuery));
-  Collection *collection=nullptr;
-  if(!g_activeCollection.empty()&&g_activeCollection!="favorites"){
-    auto found=std::find_if(g_collections.begin(),g_collections.end(),
-                            [&](const auto &item){ return item.name==g_activeCollection; });
-    if(found!=g_collections.end()) collection=&*found;
-  }
   for(size_t index=0;index<g_games.size();index++){
     const Game &game=g_games[index];
-    if(g_activeCollection=="favorites"&&!g_favorites.count(game.key)) continue;
-    if(collection&&!collection->members.count(game.key)) continue;
-    if(!query.empty()){
-      std::string searchable=foldedKey(game.title+" "+game.file+" "+game.path);
-      if(searchable.find(query)==std::string::npos) continue;
-    }
+    if(g_libraryView==LibraryView::Recent&&(game.biosBoot||game.played<=0)) continue;
+    if(g_libraryView==LibraryView::Favorites&&!g_favorites.count(game.key)) continue;
     g_visibleGames.push_back(index);
   }
+  if(g_libraryView==LibraryView::Recent)
+    std::stable_sort(g_visibleGames.begin(),g_visibleGames.end(),[](size_t left,size_t right){
+      return g_games[left].played>g_games[right].played;
+    });
 }
 
 static Game *visibleGame(int index)
@@ -2337,6 +2115,21 @@ static int visibleIndexForKey(const std::string &key)
   for(int index=0;index<(int)g_visibleGames.size();index++)
     if(g_games[g_visibleGames[index]].key==key) return index;
   return 0;
+}
+
+static int libraryTabCount(){ return 3; }
+
+static int libraryTabIndex(){ return (int)g_libraryView; }
+
+static void selectLibraryTab(int tab,int &selection){
+  if(Game *game=visibleGame(selection)) g_librarySelections[libraryTabIndex()]=game->key;
+  tab=std::clamp(tab,0,libraryTabCount()-1);
+  g_libraryView=(LibraryView)tab;
+  rebuildVisibleGames();
+  selection=visibleIndexForKey(g_librarySelections[tab]);
+  g_libraryHeaderSelection=tab;
+  g_recentPosition=-1;
+  beginScreenFx();
 }
 
 static int detectRegion(const std::string &file) {
@@ -2356,12 +2149,10 @@ static int detectRegion(const std::string &file) {
   if (l.find("ntsc-u")!=std::string::npos) return 1;
   return 0;
 }
-static void applySort() {
+static void sortLibraryGames() {
   auto cmpTitle = [](const Game &a, const Game &b){ return strcasecmp(a.title.c_str(), b.title.c_str()) < 0; };
   std::sort(g_games.begin(), g_games.end(), [&](const Game &a, const Game &b){
     if (a.biosBoot != b.biosBoot) return a.biosBoot;
-    if (g_sort == SORT_RECENT && a.played != b.played) return a.played > b.played;
-    if (g_sort == SORT_ADDED  && a.added  != b.added)  return a.added  > b.added;
     return cmpTitle(a, b);
   });
   rebuildVisibleGames();
@@ -2928,7 +2719,7 @@ static void startGameScan(const std::vector<std::string> &sourcePaths,bool repla
   stopGameScan();
   if(replace){
     cancelQueuedCoverDecodes();
-    for(auto &game:g_games) if(game.cover) SDL_DestroyTexture(game.cover);
+    for(auto &game:g_games) releaseGameArtwork(game);
     g_games.clear(); g_visibleGames.clear(); g_coverUseSerial=0; g_claimedLibraryIds.clear();
     if(strcmp(storeGet(g_global,"Wrapper/ShowPS2BIOS","true"),"false")!=0){
       Game bios; bios.title="PS2 BIOS"; bios.file="System Menu";
@@ -2978,7 +2769,6 @@ static void startGameScan(const std::vector<std::string> &sourcePaths,bool repla
         game.pathKey=makeLegacyPathKey(game.file,game.path);
         game.fileSize=static_cast<uint64_t>(info.st_size);
         game.modified=static_cast<long long>(info.st_mtime);
-        game.added=game.modified;
         const auto cached=identityCache.find(pathIdentity(game.path));
         if(cached!=identityCache.end()&&cached->second.fileSize==game.fileSize&&
            cached->second.modified==game.modified)
@@ -3027,11 +2817,11 @@ static void removeGamesFromStorage(const std::unordered_set<std::string> &storag
   if(storageIds.empty()) return;
   g_games.erase(std::remove_if(g_games.begin(),g_games.end(),[&](Game &game){
     if(game.biosBoot||!storageIds.count(game.storageId)) return false;
-    if(game.cover) SDL_DestroyTexture(game.cover);
+    releaseGameArtwork(game);
     g_claimedLibraryIds.erase(game.key);
     return true;
   }),g_games.end());
-  applySort();
+  sortLibraryGames();
 }
 
 static void pumpGameScan()
@@ -3061,7 +2851,7 @@ static void pumpGameScan()
       if(existing->fileSize==game.fileSize&&existing->modified==game.modified&&
          existing->fingerprint==game.fingerprint)
         continue;
-      if(existing->cover)SDL_DestroyTexture(existing->cover);
+      releaseGameArtwork(*existing);
       g_claimedLibraryIds.erase(existing->key);
       g_games.erase(existing);
     }
@@ -3078,7 +2868,7 @@ static void pumpGameScan()
       std::map<std::string,size_t> counts;
       for(const auto &game:g_games)if(!game.biosBoot)counts[foldedKey(game.legacyKey)]++;
       for(auto &game:g_games)game.legacyUnique=!game.biosBoot&&counts[foldedKey(game.legacyKey)]==1;
-      applySort();state->unsortedPublished=0;
+      sortLibraryGames();state->unsortedPublished=0;
     }else rebuildVisibleGames();
   }
   bool drained=false;
@@ -3102,16 +2892,16 @@ static void pumpGameScan()
           static_cast<uint64_t>(info.st_size)==game.fileSize&&
           static_cast<long long>(info.st_mtime)==game.modified;
         if(exists)return false;
-        if(game.cover)SDL_DestroyTexture(game.cover);
+        releaseGameArtwork(game);
         g_claimedLibraryIds.erase(game.key);
         return true;
       }),g_games.end());
-      applySort();
+      sortLibraryGames();
     }
     std::map<std::string,size_t> counts;
     for(const auto &game:g_games)if(!game.biosBoot)counts[foldedKey(game.legacyKey)]++;
     for(auto &game:g_games)game.legacyUnique=!game.biosBoot&&counts[foldedKey(game.legacyKey)]==1;
-    applySort();
+    sortLibraryGames();
     g_libraryScan.reset();
     saveLibraryIdentities();
     if(!g_pendingScanSources.empty()){
@@ -3124,6 +2914,14 @@ static void pumpGameScan()
 static std::string coverPath(const Game &g) {
   return g.biosBoot ? "romfs:/bios-cover.png" : std::string(COVERS_DIR) + "/" + g.key + ".png";
 }
+static std::string backgroundPath(const Game &game){
+  return std::string(COVERS_DIR)+"/"+game.key+".background.png";
+}
+
+static std::string artworkKey(const Game &game,const char *field){
+  return "Artwork/"+game.key+"/"+field;
+}
+
 static std::vector<std::string> coverCandidatePaths(const Game &g) {
   std::vector<std::string> paths{coverPath(g)};
   if(!g.pathKey.empty()){
@@ -3143,6 +2941,7 @@ static std::string existingCoverPath(const Game &g) {
 }
 
 static Game *findGameByKey(const std::string &key) {
+  if(key.empty()) return nullptr;
   for (auto &game : g_games)
     if (game.key == key) return &game;
   for(auto &game:g_games) if(game.pathKey==key) return &game;
@@ -3163,14 +2962,15 @@ static int g_cover_budget = 1 << 30;
 
 struct CoverDecodeJob {
   std::string key;
+  bool background=false;
   std::vector<std::string> paths;
   Uint64 request=0;
   Uint64 epoch=0;
 };
 struct CoverDecodeResult {
   std::string key;
+  bool background=false;
   Uint64 request=0;
-  Uint64 epoch=0;
   int width=0,height=0;
   std::vector<Uint8> pixels;
 };
@@ -3183,7 +2983,7 @@ static bool g_coverDecodeStarted=false,g_coverDecodeStop=false;
 static Uint64 g_coverDecodeEpoch=1,g_coverRequestSerial=0;
 
 static CoverDecodeResult decodeCover(const CoverDecodeJob &job) {
-  CoverDecodeResult result;result.key=job.key;result.request=job.request;result.epoch=job.epoch;
+  CoverDecodeResult result;result.key=job.key;result.background=job.background;result.request=job.request;
   SDL_Surface *source=nullptr;
   for(const std::string &path:job.paths){source=IMG_Load(path.c_str());if(source)break;}
   if(!source||source->w<1||source->h<1||source->w>8192||source->h>8192||
@@ -3191,7 +2991,7 @@ static CoverDecodeResult decodeCover(const CoverDecodeJob &job) {
     if(source)SDL_FreeSurface(source);
     return result;
   }
-  constexpr int maxWidth=360,maxHeight=540;
+  const int maxWidth=job.background?1280:360,maxHeight=job.background?720:540;
   int width=source->w,height=source->h;
   if(width>maxWidth){height=(int)((long long)height*maxWidth/width);width=maxWidth;}
   if(height>maxHeight){width=(int)((long long)width*maxHeight/height);height=maxHeight;}
@@ -3258,17 +3058,20 @@ static void cancelQueuedCoverDecodes() {
     std::lock_guard<std::mutex> lock(g_coverDecodeMutex);
     ++g_coverDecodeEpoch;g_coverDecodeJobs.clear();g_coverDecodeReady.clear();
   }
-  for(Game &game:g_games){game.coverQueued=false;game.coverRequest=0;}
+  for(Game &game:g_games){game.coverQueued=game.backgroundQueued=false;game.coverRequest=game.backgroundRequest=0;}
   g_coverDecodeCondition.notify_all();
 }
 
-static void queueCoverDecode(Game &game,bool priority) {
-  if(game.cover||game.triedCover)return;
-  if(game.coverQueued){
+static void queueCoverDecode(Game &game,bool priority,bool background=false) {
+  bool &queued=background?game.backgroundQueued:game.coverQueued;
+  bool &tried=background?game.triedBackground:game.triedCover;
+  Uint64 &request=background?game.backgroundRequest:game.coverRequest;
+  if((background?game.background:game.cover)||tried) return;
+  if(queued){
     if(priority){
       std::lock_guard<std::mutex> lock(g_coverDecodeMutex);
       const auto found=std::find_if(g_coverDecodeJobs.begin(),g_coverDecodeJobs.end(),
-          [&](const CoverDecodeJob &job){return job.request==game.coverRequest;});
+          [&](const CoverDecodeJob &job){return job.request==request;});
       if(found!=g_coverDecodeJobs.end()&&found!=g_coverDecodeJobs.begin()){
         CoverDecodeJob job=std::move(*found);g_coverDecodeJobs.erase(found);
         g_coverDecodeJobs.emplace_front(std::move(job));g_coverDecodeCondition.notify_one();
@@ -3278,8 +3081,9 @@ static void queueCoverDecode(Game &game,bool priority) {
   }
   if(g_cover_budget<=0)return;
   --g_cover_budget;
-  CoverDecodeJob job;job.key=game.key;job.paths=coverCandidatePaths(game);
-  job.request=++g_coverRequestSerial;game.coverRequest=job.request;game.coverQueued=true;
+  CoverDecodeJob job;job.key=game.key;job.background=background;
+  job.paths=background?std::vector<std::string>{backgroundPath(game)}:coverCandidatePaths(game);
+  job.request=++g_coverRequestSerial;request=job.request;queued=true;
   CoverDecodeJob dropped;bool didDrop=false;
   {
     std::lock_guard<std::mutex> lock(g_coverDecodeMutex);job.epoch=g_coverDecodeEpoch;
@@ -3289,8 +3093,12 @@ static void queueCoverDecode(Game &game,bool priority) {
     if(priority)g_coverDecodeJobs.emplace_front(std::move(job));
     else g_coverDecodeJobs.emplace_back(std::move(job));
   }
-  if(didDrop)if(Game *old=findGameByKey(dropped.key))if(old->coverRequest==dropped.request){
-    old->coverQueued=false;old->coverRequest=0;
+  if(didDrop) if(Game *old=findGameByKey(dropped.key)){
+    Uint64 &oldRequest=dropped.background?old->backgroundRequest:old->coverRequest;
+    if(oldRequest==dropped.request){
+      (dropped.background?old->backgroundQueued:old->coverQueued)=false;
+      oldRequest=0;
+    }
   }
   g_coverDecodeCondition.notify_one();
 }
@@ -3318,6 +3126,23 @@ static void installCover(Game &g, SDL_Texture *cover) {
   g.cover = cover;
   g.coverAt = SDL_GetTicks();
   touchCover(g);
+}
+
+static void installBackground(Game &game,SDL_Texture *texture){
+  size_t resident=0;
+  Game *victim=nullptr;
+  for(Game &candidate:g_games){
+    if(!candidate.background) continue;
+    ++resident;
+    if(candidate.key==g_backgroundCurrent||candidate.key==g_backgroundPrevious) continue;
+    if(!victim||candidate.backgroundUse<victim->backgroundUse) victim=&candidate;
+  }
+  if(resident>=BACKGROUND_CACHE_LIMIT){
+    if(!victim){ SDL_DestroyTexture(texture); return; }
+    SDL_DestroyTexture(victim->background);victim->background=nullptr;
+    victim->backgroundUse=0;victim->triedBackground=false;
+  }
+  game.background=texture;game.backgroundUse=++g_coverUseSerial;
 }
 
 static SDL_Texture *uploadCoverTexture(const CoverDecodeResult &result) {
@@ -3349,11 +3174,15 @@ static void pumpCoverDecodeResults() {
     }
     g_coverDecodeCondition.notify_one();++processed;
     Game *game=findGameByKey(result.key);
-    if(!game||game->coverRequest!=result.request)continue;
-    game->coverQueued=false;game->triedCover=true;
+    if(!game||(result.background?game->backgroundRequest:game->coverRequest)!=result.request)continue;
+    (result.background?game->backgroundQueued:game->coverQueued)=false;
+    (result.background?game->triedBackground:game->triedCover)=true;
     if(!result.pixels.empty()){
       SDL_Texture *texture=uploadCoverTexture(result);++uploads;
-      if(texture)installCover(*game,texture);
+      if(texture){
+        if(result.background) installBackground(*game,texture);
+        else installCover(*game,texture);
+      }
     }
   }
 }
@@ -3366,6 +3195,60 @@ static void reloadCover(Game &g) {
   if (g.cover) { SDL_DestroyTexture(g.cover); g.cover = nullptr; }
   g.coverUse=0;g.triedCover=false;g.coverQueued=false;g.coverRequest=0;
   g_cover_budget=std::max(g_cover_budget,1);queueCoverDecode(g,true);
+}
+
+static void reloadBackground(Game &game){
+  if(game.background) SDL_DestroyTexture(game.background);
+  game.background=nullptr;game.backgroundUse=0;game.triedBackground=false;
+  game.backgroundQueued=false;game.backgroundRequest=0;
+}
+
+static SDL_Rect fitArtworkRect(int width,int height,const SDL_Rect &bounds){
+  if(width<1||height<1||bounds.w<1||bounds.h<1) return {bounds.x,bounds.y,0,0};
+  int w=bounds.w,h=std::max(1,(int)((long long)height*w/width));
+  if(h>bounds.h){ h=bounds.h;w=std::max(1,(int)((long long)width*h/height)); }
+  return {bounds.x+(bounds.w-w)/2,bounds.y+(bounds.h-h)/2,w,h};
+}
+
+static void drawBackgroundArtwork(const std::string &key,Uint8 alpha){
+  Game *game=findGameByKey(key);
+  if(!game||!alpha) return;
+  SDL_Texture *texture=game->background?game->background:game->triedBackground?game->cover:nullptr;
+  if(!texture) return;
+  if(game->background) game->backgroundUse=++g_coverUseSerial;
+  else touchCover(*game);
+  int width=0,height=0;SDL_QueryTexture(texture,nullptr,nullptr,&width,&height);
+  if(width<1||height<1) return;
+  SDL_Rect src{0,0,width,height},destination{0,0,SW,SH};
+  if((long long)width*SH>(long long)height*SW){src.w=height*SW/SH;src.x=(width-src.w)/2;}
+  else {src.h=width*SH/SW;src.y=(height-src.h)/2;}
+  SDL_SetTextureColorMod(texture,205,205,205);SDL_SetTextureAlphaMod(texture,alpha);
+  SDL_RenderCopy(g_ren,texture,&src,&destination);
+  SDL_SetTextureColorMod(texture,255,255,255);SDL_SetTextureAlphaMod(texture,255);
+}
+
+static void drawClassicBackground(){
+  Game *target=findGameByKey(g_backgroundTarget);
+  bool ready=!target;
+  if(target){
+    if(target->background) target->backgroundUse=++g_coverUseSerial;
+    else queueCoverDecode(*target,true,true);
+    if(target->triedBackground&&!target->background) ensureCover(*target,true);
+    ready=target->background||(target->triedBackground&&(target->cover||target->triedCover));
+  }
+  if(ready&&g_backgroundCurrent!=g_backgroundTarget){
+    g_backgroundPrevious=g_backgroundCurrent;g_backgroundCurrent=g_backgroundTarget;
+    g_backgroundSince=SDL_GetTicks();
+  }
+  const Uint32 elapsed=SDL_GetTicks()-g_backgroundSince;
+  const Uint8 alpha=!g_uiAnimations||elapsed>=300?255:(Uint8)(elapsed*255/300);
+  if(alpha==255) g_backgroundPrevious.clear();
+  else g_interactionAnimationUntil=SDL_GetTicks()+100;
+  drawBackgroundArtwork(g_backgroundPrevious,255);
+  drawBackgroundArtwork(g_backgroundCurrent,alpha);
+  fillRect(0,0,SW,SH,{0,0,0,25});
+  drawGradient({0,0,SW*2/3,SH},{0,0,0,120},{0,0,0,0},true);
+  drawGradient({0,SH/2,SW,SH-SH/2},{0,0,0,0},{0,0,0,220});
 }
 
 static bool promptTextMode(const char *header, const char *initial, char *out, size_t outSize,
@@ -3438,24 +3321,6 @@ static bool pathAtOrBelow(const std::string &path,const std::string &root) {
   if(base.empty()||candidate.size()<base.size()||candidate.compare(0,base.size(),base)!=0) return false;
   if(candidate.size()==base.size()) return true;
   return base.back()=='/'||candidate[base.size()]=='/';
-}
-
-static std::string gameLocationLabel(const Game &game) {
-  if(game.biosBoot) return "PS2 system menu  \xc2\xb7  BIOS";
-  const std::string path=normalizeLocationPath(game.path);
-  if(path.empty()) return "Unknown location";
-  for(const auto &share:loadSmbSharesFromStore()){
-    const std::string root=normalizeLocationPath(SwitchStorage::SmbRootPath(share.id));
-    if(!pathAtOrBelow(path,root)) continue;
-    std::string relative=path.substr(std::min(path.size(),root.size()));
-    while(!relative.empty()&&relative.front()=='/') relative.erase(relative.begin());
-    std::string address="SMB: smb://"+share.server+"/"+share.share;
-    if(!relative.empty()) address+="/"+relative;
-    return address;
-  }
-  if(path.rfind("sdmc:",0)==0) return "SD: "+path;
-  if(path.rfind("ums",0)==0) return "USB: "+path;
-  return path;
 }
 
 static void replaceSavedPathPrefix(const std::string &oldPath,const std::string &newPath) {
@@ -3711,6 +3576,22 @@ static bool executePaste(const std::string &folder) {
   return ok;
 }
 
+static void drawBusyTaskFrame(const std::string &title,const std::string &detail,bool cancellable,bool cancelled){
+  clearUiBackground();
+  drawLocalizedHeader(title.c_str(),nullptr);
+  const int width=std::min(920,SW-180),height=250;
+  const int x=(SW-width)/2,y=(SH-height)/2;
+  glassPanel(x,y,width,height);
+  std::string working=tr("Working");
+  working.append((SDL_GetTicks()/220)%4,'.');
+  drawTextC(g_font_big,SW/2,y+32,working.c_str(),COL_VAL);
+  drawTextC(g_font_sm,SW/2,y+92,fittedText(g_font_sm,detail,width-108).c_str(),COL_DIM);
+  drawWrappedCentered(g_font_sm,SW/2,y+136,width-108,32,2,
+      tr(cancelled?"Cancelling at the next safe point...":
+         "Do not remove the active storage device or close NetherSX2."),COL_DIM);
+  if(cancellable&&!cancelled) drawSettingsFooter("B  Cancel",y+height-28);
+}
+
 static void runBusyTask(const std::string &title,const std::string &detail,
                         const std::function<void()> &task,std::atomic_bool *cancel=nullptr) {
   std::atomic_bool complete{false};
@@ -3724,21 +3605,7 @@ static void runBusyTask(const std::string &title,const std::string &detail,
       if(cancel&&event.type==SDL_CONTROLLERBUTTONDOWN&&event.cbutton.button==BTN_CANCEL)
         cancel->store(true,std::memory_order_release);
     }
-    clearUiBackground();
-    drawLocalizedHeader(title.c_str(),nullptr);
-    const int panelWidth=std::min(920,SW-180),panelHeight=250;
-    const int panelX=(SW-panelWidth)/2,panelY=(SH-panelHeight)/2;
-    glassPanel(panelX,panelY,panelWidth,panelHeight);
-    std::string working=tr("Working");
-    working.append((SDL_GetTicks()/220)%4,'.');
-    drawTextC(g_font_big,SW/2,panelY+40,working.c_str(),COL_VAL);
-    drawTextC(g_font_sm,SW/2,panelY+100,
-              ellipsizedText(g_font_sm,detail,panelWidth-108).c_str(),COL_DIM);
-    drawWrapped(g_font_sm,panelX+54,panelY+144,panelWidth-108,32,2,
-                tr(cancel&&cancel->load(std::memory_order_acquire)?
-                   "Cancelling at the next safe point...":
-                   "Do not remove the active storage device or close NetherSX2."),COL_DIM);
-    if(cancel&&!cancel->load(std::memory_order_acquire)) drawSettingsFooter("B  Cancel",panelY+panelHeight-28);
+    drawBusyTaskFrame(title,detail,cancel!=nullptr,cancel&&cancel->load(std::memory_order_acquire));
     SDL_RenderPresent(g_ren);
     waitForNextFrame();
   }
@@ -3919,9 +3786,9 @@ static bool editSmbShare(SwitchStorage::SmbShare &share,bool creating) {
     const bool onToggle=sel==fieldCount-1;
     FootItem footer[3];int hintCount=0;
     footer[hintCount++]={"A",sel==saveRow?(creating?"Connect and save":"Save changes"):
-                             (onToggle?"Toggle":"Edit"),FA_NONE};
-    if(onToggle) footer[hintCount++]={"Left / Right","Change",FA_NONE};
-    footer[hintCount++]={"B","Cancel",FA_NONE};
+                             (onToggle?"Toggle":"Edit")};
+    if(onToggle) footer[hintCount++]={"Left / Right","Change"};
+    footer[hintCount++]={"B","Cancel"};
     drawFooterHints(footer,hintCount,SH-26);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextFrame();
   }
@@ -4302,7 +4169,7 @@ static std::string runFileBrowser(const std::string &start,BrowserMode mode) {
         if(event.cbutton.button==SDL_CONTROLLER_BUTTON_DPAD_UP) sel=(sel+n-1)%n;
         else if(event.cbutton.button==SDL_CONTROLLER_BUTTON_DPAD_DOWN) sel=(sel+1)%n;
         else if(event.cbutton.button==BTN_CANCEL){ if(current.empty()) return {}; current=parentFolder(current); sel=top=0; rebuild=true; }
-        else if(event.cbutton.button==BTN_SETTINGS){ if(browserActions(items[sel],mode)) rebuild=true; }
+        else if(event.cbutton.button==BTN_X){ if(browserActions(items[sel],mode)) rebuild=true; }
         else if(event.cbutton.button==SDL_CONTROLLER_BUTTON_START&&mode==BrowserMode::Manage&&
                 current.empty()&&!items[sel].storageId.empty()){
           if(ejectUsbLocation(items[sel].storageId)) rebuild=true;
@@ -4349,12 +4216,12 @@ static std::string runFileBrowser(const std::string &start,BrowserMode mode) {
       const bool canPaste=mode==BrowserMode::Manage&&!current.empty()&&!g_fileClipboard.path.empty();
       const bool canOpen=!(mode==BrowserMode::Manage&&row.kind==BrowserItemKind::File);
       FootItem footer[5];int hintCount=0;
-      if(canOpen) footer[hintCount++]={"A","Select",FA_NONE};
+      if(canOpen) footer[hintCount++]={"A","Select"};
       if(browserHasActions(row,mode))
-        footer[hintCount++]={"X",mode==BrowserMode::Manage?"Actions":"Pin",FA_NONE};
-      if(canPaste) footer[hintCount++]={"Y","Paste",FA_NONE};
-      if(canEject) footer[hintCount++]={"+","Safe eject",FA_NONE};
-      footer[hintCount++]={"B","Back",FA_NONE};
+        footer[hintCount++]={"X",mode==BrowserMode::Manage?"Actions":"Pin"};
+      if(canPaste) footer[hintCount++]={"Y","Paste"};
+      if(canEject) footer[hintCount++]={"+","Safe eject"};
+      footer[hintCount++]={"B","Back"};
       drawFooterHints(footer,hintCount,SH-26);
       SDL_RenderPresent(g_ren); waitForNextFrame();
     }
@@ -4601,7 +4468,7 @@ static std::string captureButtonCombo(SDL_GameController *pad,const char *action
   }
 }
 
-static void beginScreenFx(){ g_fxT = SDL_GetTicks(); g_hy = -1; g_textScroll.clear(); g_footN=0; }
+static void beginScreenFx(){ g_fxT = SDL_GetTicks(); g_hy = -1; g_textScroll.clear(); g_footN=0; g_libraryTriggers={}; }
 static void drawFadeIn(){
   if(!g_uiAnimations) return;
   const int D = 160; int el = (int)(SDL_GetTicks() - g_fxT);
@@ -4609,13 +4476,9 @@ static void drawFadeIn(){
 }
 // top-bar height, shared by the grid header (gridLayout y0) and the settings header
 static int topBarH(){ return 80; }
-// Left logo, small caption "eyebrow" above a large scrolling title, right-aligned
-// summary/detail metadata. Replaces the old centred-title band.
 static void drawPageHeader(const char *title,const char *eyebrow,const char *summary,const char *detail=nullptr){
-  const int height=topBarH(),margin=32,logoSize=48,left=margin+logoSize+20;
-  fillRect(0,0,SW,height,COL_PANEL);
-  fillRect(0,height-1,SW,1,(SDL_Color){255,255,255,18});
-  if(g_logo){ SDL_Rect rect={margin,16,logoSize,logoSize}; SDL_RenderCopy(g_ren,g_logo,nullptr,&rect); }
+  const int height=topBarH(),margin=40,left=margin;
+  drawGradient({0,0,SW,height+48},{0,0,0,125},{0,0,0,0});
   const int metadataWidth=std::min(SW/3,std::max(textW(g_font_sm,summary),textW(g_font_sm,detail)));
   const int titleWidth=SW-left-margin-(metadataWidth?metadataWidth+32:0);
   drawText(g_font_caption,left,9,fittedText(g_font_caption,eyebrow?eyebrow:"",titleWidth).c_str(),COL_DIM);
@@ -4699,7 +4562,7 @@ static void showHelpCard(const char *section,const char *title,const char *kind,
       if(event.type==SDL_CONTROLLERBUTTONDOWN&&
          (event.cbutton.button==BTN_CONFIRM||
           event.cbutton.button==BTN_CANCEL||
-          event.cbutton.button==BTN_SETTINGS)) return;
+          event.cbutton.button==BTN_X)) return;
     }
 
     clearUiBackground();
@@ -4726,7 +4589,7 @@ static void showHelpCard(const char *section,const char *title,const char *kind,
                 translatedDescription.c_str(),COL_TXT);
     // A, B and X all close; naming one is enough. The bare A / B glyphs this
     // used to draw read as broken hints with no caption beside them.
-    FootItem footer[]={{"A","Close",FA_NONE},{"Touch","anywhere to close",FA_NONE}};
+    FootItem footer[]={{"A","Close"},{"Touch","anywhere to close"}};
     drawFooterHints(footer,2,panelY+panelHeight-30);
     SDL_RenderPresent(g_ren);
     waitForNextFrame();
@@ -4804,11 +4667,11 @@ static void renderSettings(int scr,int sel,int top,const char *ctx){
   const Opt *row=(sel>=0&&sel<S.n)?&S.opts[sel]:nullptr;
   const char *confirm=row?confirmLabelForOption(*row,S.binds):nullptr;
   FootItem footer[5];int hintCount=0;
-  if(row&&canAdjustOption(*row)) footer[hintCount++]={"Left / Right","Change",FA_NONE};
-  if(confirm) footer[hintCount++]={"A",confirm,FA_NONE};
-  footer[hintCount++]={"X","Info",FA_NONE};
-  if(row&&canResetOption(*row)) footer[hintCount++]={"Y","Reset",FA_NONE};
-  footer[hintCount++]={"B","Back",FA_NONE};
+  if(row&&canAdjustOption(*row)) footer[hintCount++]={"Left / Right","Change"};
+  if(confirm) footer[hintCount++]={"A",confirm};
+  footer[hintCount++]={"X","Info"};
+  if(row&&canResetOption(*row)) footer[hintCount++]={"Y","Reset"};
+  footer[hintCount++]={"B","Back"};
   drawFooterHints(footer,hintCount,SH-26);
   drawFadeIn();
   SDL_RenderPresent(g_ren);
@@ -4863,7 +4726,7 @@ static int dropdown(const char *title, const char *const *labels, int n, int cur
       fillRect(px+pw-18,ly,3,height,COL_CARD);
       fillRect(px+pw-18,ly+(height-thumb)*top/(n-vis),3,thumb,COL_SEL);
     }
-    FootItem footer[]={{"A","Select",FA_NONE},{"B","Back",FA_NONE}};
+    FootItem footer[]={{"A","Select"},{"B","Back"}};
     drawFooterHints(footer,2,py+ph-28);
     drawFadeIn();
     SDL_RenderPresent(g_ren);
@@ -4952,7 +4815,7 @@ static void runSettings(int scr, SDL_GameController *pad, const char *ctx) {
           else optAdjust(o,1);
           break;
         }
-        case BTN_SETTINGS:
+        case BTN_X:
           showOptionHelp(tr(S.title),S.opts[sel],ctx&&*ctx?tr("Per-game setting"):tr("Global setting"));
           beginScreenFx();
           break;
@@ -4995,7 +4858,7 @@ static std::string launcherUpdateStatusText() {
 static void launcherSettingsScreen() {
   static int savedSelection=0;
   const int optionCount=(int)(sizeof(S_launcher)/sizeof(Opt));
-  const int coversRow=optionCount,listCount=optionCount+1;
+  const int listCount=optionCount;
   const int updateRow=listCount,selectionCount=listCount+1;
   int sel=std::max(0,std::min(savedSelection,selectionCount-1)),top=0;
   // Scroll the saved row back into view, or the highlight is drawn for a row
@@ -5055,20 +4918,15 @@ static void launcherSettingsScreen() {
       else if(event.cbutton.button==SDL_CONTROLLER_BUTTON_DPAD_RIGHT&&sel<optionCount){ optAdjust(S_launcher[sel],1); applyChange(); }
       else if(event.cbutton.button==BTN_CONFIRM){
         if(sel==updateRow){ runUpdateScreen(); beginScreenFx(); }
-        else if(sel==coversRow){ downloadAllCovers(); beginScreenFx(); }
         else {
           const Opt &option=S_launcher[sel];
           if(option.type==OT_CHOICE&&option.nch>2){ optChoosePopup(option); beginScreenFx(); }
           else optAdjust(option,1);
           applyChange();
         }
-      } else if(event.cbutton.button==BTN_SETTINGS){
+      } else if(event.cbutton.button==BTN_X){
         if(sel<optionCount)
           showOptionHelp("Launcher",S_launcher[sel],"Launcher setting");
-        else if(sel==coversRow)
-          showHelpCard("Launcher","Download all covers","Library artwork",
-                       "Downloads missing cover artwork for the whole library from SteamGridDB. Existing local covers are kept.",
-                       nullptr,"Launcher action");
         else
           showHelpCard("Launcher","Check for Updates","Verified launcher update",
                        "Checks the latest published NetherSX2_nx GitHub release, verifies its SHA-256 digest and NRO structure, then safely replaces this launcher with rollback recovery.",
@@ -5100,16 +4958,11 @@ static void launcherSettingsScreen() {
     }
     for(int row=0;row<visible&&top+row<listCount;row++){
       int index=top+row,slotY=LIST_Y0+row*ROW_H; bool current=index==sel;
-      if(index==coversRow){
-        drawSettingsRowText(tr("Download covers"),"SteamGridDB",slotY,colW,labelX,valX,current,
-                            current?COL_VAL:COL_TXT,current?COL_VAL:COL_DIM);
-      } else {
-        char value[96]; optValue(S_launcher[index],value,sizeof(value));
-        SDL_Color valueColor=current?COL_VAL:COL_DIM;
-        optValueVerdictColor(S_launcher[index],&valueColor);
-        drawSettingsRowText(tr(S_launcher[index].label),value,slotY,colW,labelX,valX,current,
-                            current?COL_VAL:COL_TXT,valueColor);
-      }
+      char value[96]; optValue(S_launcher[index],value,sizeof(value));
+      SDL_Color valueColor=current?COL_VAL:COL_DIM;
+      optValueVerdictColor(S_launcher[index],&valueColor);
+      drawSettingsRowText(tr(S_launcher[index].label),value,slotY,colW,labelX,valX,current,
+                          current?COL_VAL:COL_TXT,valueColor);
     }
     const int buttonWidth=std::min(500,SW-80),buttonHeight=58;
     const int buttonX=(SW-buttonWidth)/2;
@@ -5119,16 +4972,14 @@ static void launcherSettingsScreen() {
     drawTextC(g_font,SW/2,buttonY+(buttonHeight-rowFontHeight)/2,tr("Check for Updates"),updateSelected?COL_VAL:COL_TXT);
     const std::string updateStatus=launcherUpdateStatusText();
     drawTextC(g_font_sm,SW/2,buttonY+buttonHeight+8,updateStatus.c_str(),updateSelected?COL_VAL:COL_DIM);
-    // This list is followed by two plain buttons, so every option-only hint has
-    // to bound-check `sel` before it touches S_launcher.
     const bool onOption=sel>=0&&sel<optionCount;
     const char *confirm=onOption?confirmLabelForOption(S_launcher[sel]):"Select";
     FootItem footer[5];int hintCount=0;
-    if(onOption&&canAdjustOption(S_launcher[sel])) footer[hintCount++]={"Left / Right","Change",FA_NONE};
-    if(confirm) footer[hintCount++]={"A",confirm,FA_NONE};
-    footer[hintCount++]={"X","Info",FA_NONE};
-    if(onOption&&canResetOption(S_launcher[sel])) footer[hintCount++]={"Y","Reset",FA_NONE};
-    footer[hintCount++]={"B","Back",FA_NONE};
+    if(onOption&&canAdjustOption(S_launcher[sel])) footer[hintCount++]={"Left / Right","Change"};
+    if(confirm) footer[hintCount++]={"A",confirm};
+    footer[hintCount++]={"X","Info"};
+    if(onOption&&canResetOption(S_launcher[sel])) footer[hintCount++]={"Y","Reset"};
+    footer[hintCount++]={"B","Back"};
     drawFooterHints(footer,hintCount,SH-26);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextFrame();
   }
@@ -5214,13 +5065,14 @@ static void gameSourcesScreen() {
 
 static void libraryStorageScreen() {
   static int savedSelection=0;
-  constexpr int rowCount=3;
+  constexpr int rowCount=4;
   const int rowHeight=settingsRowH(),startY=settingsListY()+40;
   int sel=std::max(0,std::min(savedSelection,rowCount-1));
   auto openRow=[&](){
     if(sel==0) gameSourcesScreen();
     else if(sel==1) runFileManager();
-    else networkSharesScreen();
+    else if(sel==2) networkSharesScreen();
+    else downloadAllCovers();
     beginScreenFx();
   };
   beginScreenFx();
@@ -5238,13 +5090,19 @@ static void libraryStorageScreen() {
       if(event.cbutton.button==SDL_CONTROLLER_BUTTON_DPAD_UP) sel=(sel+rowCount-1)%rowCount;
       else if(event.cbutton.button==SDL_CONTROLLER_BUTTON_DPAD_DOWN) sel=(sel+1)%rowCount;
       else if(event.cbutton.button==BTN_CONFIRM) openRow();
+      else if(event.cbutton.button==BTN_X&&sel==3){
+        showHelpCard("Library & storage","Download covers","Library artwork",
+                     "Downloads missing covers and Classic backgrounds from SteamGridDB. Existing local artwork is kept.",
+                     nullptr,"Launcher action");
+        beginScreenFx();
+      }
       else if(event.cbutton.button==BTN_CANCEL){ savedSelection=sel; return; }
     }
 
     clearUiBackground();
     drawLocalizedHeader("Library & storage",nullptr);
     int colX,colW,labelX,valX; listCol(&colX,&colW,&labelX,&valX);
-    drawSectionHeading("Locations",colX,startY-44,colW);
+    drawSectionHeading("General",colX,startY-44,colW);
     glassPanel(colX-12,startY-8,colW+24,rowCount*rowHeight+16);
     float target=(float)(startY+sel*rowHeight+2);
     g_hy=(!g_uiAnimations||g_hy<0)?target:g_hy+(target-g_hy)*0.30f;
@@ -5254,14 +5112,16 @@ static void libraryStorageScreen() {
     size_t folderCount=loadGameSources().size();
     std::string folderValue=std::to_string(folderCount)+(folderCount==1?" folder":" folders");
     std::string smbValue=std::to_string(mounted)+" / "+std::to_string(shares.size())+" connected";
-    const char *labels[rowCount]={"Game folders","File manager","SMB network shares"};
-    const char *values[rowCount]={folderValue.c_str(),tr("SD / USB / SMB"),smbValue.c_str()};
+    const char *labels[rowCount]={"Game folders","File manager","SMB network shares","Download covers"};
+    const char *values[rowCount]={folderValue.c_str(),tr("SD / USB / SMB"),smbValue.c_str(),"SteamGridDB"};
     for(int row=0;row<rowCount;row++){
       const int slot=startY+row*rowHeight; const bool current=row==sel;
       drawSettingsRowText(tr(labels[row]),values[row],slot,colW,labelX,valX,current,
                           current?COL_VAL:COL_TXT,current?COL_VAL:COL_DIM,false,rowHeight);
     }
-    drawSettingsFooter("A  Open       B  Back");
+    FootItem footer[3]={{"A",sel==3?"Select":"Open"},{"X","Info"},{"B","Back"}};
+    if(sel==3) drawFooterHints(footer,3,SH-26);
+    else { footer[1]=footer[2];drawFooterHints(footer,2,SH-26); }
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextFrame();
   }
 }
@@ -5375,11 +5235,11 @@ static void runCheatSettings(Game &game,uint32_t crc) {
     // The row past the last cheat is the Back row: nothing there toggles.
     FootItem footer[4];int hintCount=0;
     if(sel<codeCount){
-      footer[hintCount++]={"A","Toggle",FA_NONE};
-      footer[hintCount++]={"Left","Off",FA_NONE};
-      footer[hintCount++]={"Right","On",FA_NONE};
+      footer[hintCount++]={"A","Toggle"};
+      footer[hintCount++]={"Left","Off"};
+      footer[hintCount++]={"Right","On"};
     }
-    footer[hintCount++]={"B","Back",FA_NONE};
+    footer[hintCount++]={"B","Back"};
     drawFooterHints(footer,hintCount,SH-30);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextFrame();
   }
@@ -5546,9 +5406,9 @@ static void retroAchievementsScreen() {
     // "Sign out" is inert until an account is signed in, and Left / Right only
     // moves the three On/Off rows.
     FootItem footer[3];int hintCount=0;
-    if(sel!=RA_SIGN_OUT||loggedIn) footer[hintCount++]={"A","Select",FA_NONE};
-    if(sel>=RA_ENABLED&&sel<=RA_NOTIFICATIONS) footer[hintCount++]={"Left / Right","Change",FA_NONE};
-    footer[hintCount++]={"B","Back",FA_NONE};
+    if(sel!=RA_SIGN_OUT||loggedIn) footer[hintCount++]={"A","Select"};
+    if(sel>=RA_ENABLED&&sel<=RA_NOTIFICATIONS) footer[hintCount++]={"Left / Right","Change"};
+    footer[hintCount++]={"B","Back"};
     drawFooterHints(footer,hintCount,SH-26);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextFrame();
   }
@@ -5597,7 +5457,7 @@ static void runSettingsRoot(SDL_GameController *pad, const char *ctx, Game *game
         else if(hasCheatRow&&sel==cheatRow) runCheatSettings(*game,gameCRC);
         else runSettings(order[sel-screenStart],pad,ctx);
         beginScreenFx();
-      } else if(event.cbutton.button==BTN_SETTINGS){
+      } else if(event.cbutton.button==BTN_X){
         if(global&&sel==launcherRow)
           showHelpCard("Settings","Launcher","Launcher appearance",
                        "Changes the SDL launcher's theme, library grid, labels, animations, sounds, and cover downloads.",
@@ -5651,7 +5511,7 @@ static void runSettingsRoot(SDL_GameController *pad, const char *ctx, Game *game
       const SDL_Color labelColor=current?COL_VAL:COL_TXT,valueColor=current?COL_VAL:COL_DIM;
       if(global&&index==launcherRow){
         const char *theme=storeGet(g_global,"Wrapper/Theme","animated");
-        const char *value=!strcmp(theme,"xmb")?"XMB (PS3)":(!strcmp(theme,"animated")?"Glow":(!strcmp(theme,"classic")?"Classic":(!strcmp(theme,"oled")?"OLED black":"Bubbles")));
+        const char *value=!strcmp(theme,"classic")?"Classic":"PS2";
         drawSettingsRowText(tr("Launcher"),value,slot,colW,labelX,valX,current,labelColor,valueColor,false,rowH);
       } else if(global&&index==libraryRow){
         drawSettingsRowText(tr("Library & storage"),tr("games / files / network"),
@@ -5724,7 +5584,7 @@ static void modalMessage(const char *title, const std::vector<std::string> &line
       if(y>py+ph-76) break;
     }
     SDL_RenderSetClipRect(g_ren,nullptr);
-    FootItem footer[]={{"A","Continue",FA_NONE}};
+    FootItem footer[]={{"A","Continue"}};
     drawFooterHints(footer,1,py+ph-30);
     SDL_RenderPresent(g_ren); waitForNextFrame();
   }
@@ -5795,7 +5655,6 @@ static bool confirmBoxStatic(const char *title,std::initializer_list<const char*
   const std::string shown=uiText(title);
   return confirmBox(shown.c_str(),translated);
 }
-
 
 static std::string installedReleaseTag() {
   const std::string built=LauncherUpdate_BuiltReleaseTag();
@@ -5996,11 +5855,11 @@ static void runUpdateScreen() {
         snapshot.state==LauncherUpdateState::Error||snapshot.state==LauncherUpdateState::Cancelled?"Retry":
         snapshot.state==LauncherUpdateState::Installed?"Exit NetherSX2":nullptr;
       FootItem footer[4];int hintCount=0;
-      if(confirm) footer[hintCount++]={"A",confirm,FA_NONE};
-      if(snapshot.state!=LauncherUpdateState::Installed) footer[hintCount++]={"B","Back",FA_NONE};
+      if(confirm) footer[hintCount++]={"A",confirm};
+      if(snapshot.state!=LauncherUpdateState::Installed) footer[hintCount++]={"B","Back"};
       if(maxScroll>0){
-        footer[hintCount++]={"Up / Down","Scroll",FA_NONE};
-        footer[hintCount++]={"L / R","Page",FA_NONE};
+        footer[hintCount++]={"Up / Down","Scroll"};
+        footer[hintCount++]={"L / R","Page"};
       }
       drawFooterHints(footer,hintCount,panelY+panelHeight-38);
     }
@@ -6068,13 +5927,17 @@ static void drawWrapped(TTF_Font *font,int x,int y,int maxWidth,int lineHeight,i
 // The requested size is in 720p logical units, but the image is presented at the
 // real output resolution: decode straight to output pixels so docked mode is not
 // an upscale of a 720p decode.
-static SDL_Texture *loadScaledTexture(const std::string &path,int width,int height) {
+static SDL_Texture *loadScaledTexture(const std::string &path,int width,int height,bool preserveAspect) {
   if(width<1||height<1) return nullptr;
   const float scale=g_uiScale>0.0f?g_uiScale:1.0f;
-  const int pixelWidth=std::max(1,(int)std::lround(width*scale));
-  const int pixelHeight=std::max(1,(int)std::lround(height*scale));
+  int pixelWidth=std::max(1,(int)std::lround(width*scale));
+  int pixelHeight=std::max(1,(int)std::lround(height*scale));
   SDL_Surface *source=IMG_Load(path.c_str());
   if(!source) return nullptr;
+  if(preserveAspect){
+    const SDL_Rect fitted=fitArtworkRect(source->w,source->h,{0,0,pixelWidth,pixelHeight});
+    pixelWidth=fitted.w;pixelHeight=fitted.h;
+  }
   SDL_Surface *scaled=SDL_CreateRGBSurfaceWithFormat(0,pixelWidth,pixelHeight,32,SDL_PIXELFORMAT_RGBA32);
   if(!scaled){ SDL_FreeSurface(source); return nullptr; }
   SDL_BlendMode blend=SDL_BLENDMODE_NONE;
@@ -6104,7 +5967,9 @@ static void drawArtworkPreview(SDL_Texture *texture,const SDL_Rect &rect,bool se
   fillRect(rect.x,rect.y,rect.w,rect.h,COL_CARD);
   if(texture){
     SDL_SetTextureAlphaMod(texture,255); SDL_SetTextureColorMod(texture,255,255,255);
-    SDL_RenderCopy(g_ren,texture,nullptr,&rect);
+    int w=0,h=0;SDL_QueryTexture(texture,nullptr,nullptr,&w,&h);
+    const SDL_Rect fitted=fitArtworkRect(w,h,rect);
+    SDL_RenderCopy(g_ren,texture,nullptr,&fitted);
   } else {
     drawTextC(g_font_sm,rect.x+rect.w/2,rect.y+(rect.h-fontHeight(g_font_sm))/2,
               tr("NO COVER"),COL_DIM);
@@ -6122,9 +5987,45 @@ static const char *gridDbErrorText(int result) {
   return "SteamGridDB returned an unexpected error.";
 }
 
-static int chooseCoverArtwork(const std::vector<GridDbArtwork> &artworks,const char *gameName) {
+static GameDetailLayout artworkPickerLayout(bool background){
+  if(!background) return gameDetailLayout();
+  const int top=topBarH()+24,bottom=SH-settingsFooterReserve()-12;
+  const int width=680,height=width*9/16;
+  return {{40,top+(bottom-top-height)/2,width,height},{768,top,SW-824,bottom-top}};
+}
+
+static void drawArtworkPicker(const std::vector<GridDbArtwork> &artworks,const char *gameName,
+                              bool background,int sel,int top,SDL_Texture *preview,bool previewFailed){
+  const GameDetailLayout layout=artworkPickerLayout(background);
+  const int rowHeight=settingsRowH()+8,listX=layout.content.x,listWidth=layout.content.w;
+  const int startY=layout.content.y+44,visible=std::max(1,(layout.content.h-52)/rowHeight);
+  clearUiBackground(); drawLocalizedHeader(background?"Choose background artwork":"Choose cover artwork",gameName);
+  drawSectionHeading("Online artwork",listX,startY-44,listWidth);
+  glassPanel(listX-8,startY-8,listWidth+16,std::min(visible,(int)artworks.size())*rowHeight+16);
+  for(int row=0;row<visible&&top+row<(int)artworks.size();row++){
+    int index=top+row,itemY=startY+row*rowHeight,textY=itemY+(rowHeight-fontHeight(g_font))/2; bool current=index==sel;
+    if(current) drawRowHighlight(listX,itemY,listWidth,rowHeight-3);
+    std::string label=uiText("Artwork")+" "+std::to_string(index+1);
+    drawText(g_font,listX+26,textY,label.c_str(),current?COL_VAL:COL_TXT);
+    if(artworks[index].width>0&&artworks[index].height>0){
+      std::string dimensions=std::to_string(artworks[index].width)+"x"+std::to_string(artworks[index].height);
+      drawTextR(g_font_sm,listX+listWidth-20,textY+(fontHeight(g_font)-fontHeight(g_font_sm))/2,dimensions.c_str(),current?COL_VAL:COL_DIM);
+    }
+  }
+  drawArtworkPreview(preview,layout.preview,preview!=nullptr);
+  if(previewFailed){
+    const SDL_Rect &rect=layout.preview;
+    fillRect(rect.x,rect.y,rect.w,rect.h,COL_CARD);
+    drawWrappedCentered(g_font_sm,rect.x+rect.w/2,rect.y+rect.h/2-30,rect.w-32,fontHeight(g_font_sm)+6,3,
+          tr("Preview unavailable"),COL_DIM);
+  }
+  FootItem footer[]={{"A","Use artwork"},{"B",background?"Skip background":"Back"}};
+  drawFooterHints(footer,2,SH-26);
+}
+
+static int chooseCoverArtwork(const std::vector<GridDbArtwork> &artworks,const char *gameName,bool background=false) {
   if(artworks.empty()) return -1;
-  const GameDetailLayout layout=gameDetailLayout();
+  const GameDetailLayout layout=artworkPickerLayout(background);
   const int rowHeight=settingsRowH()+8,listX=layout.content.x,listWidth=layout.content.w;
   const int startY=layout.content.y+44;
   const int visible=std::max(1,(layout.content.h-52)/rowHeight);
@@ -6140,7 +6041,7 @@ static int chooseCoverArtwork(const std::vector<GridDbArtwork> &artworks,const c
     std::atomic_bool cancel{false};int result=GRIDDB_ERROR;
     runBusyTask("Loading artwork preview",gameName?gameName:"",
                 [&]{result=griddb_download_image(url,temporary,&cancel);},&cancel);
-    if(result==GRIDDB_OK) preview=loadScaledTexture(temporary,previewWidth,previewHeight);
+    if(result==GRIDDB_OK) preview=loadScaledTexture(temporary,previewWidth,previewHeight,true);
     previewFailed=preview==nullptr; remove(temporary.c_str()); beginScreenFx();
   };
   mkdir(COVERS_DIR,0777);
@@ -6169,28 +6070,7 @@ static int chooseCoverArtwork(const std::vector<GridDbArtwork> &artworks,const c
       if(sel>=top+visible) top=sel-visible+1;
       if(sel!=previous) loadPreview(sel);
     }
-    clearUiBackground(); drawLocalizedHeader("Choose cover artwork",gameName);
-    drawSectionHeading("Online artwork",listX,startY-44,listWidth);
-    glassPanel(listX-8,startY-8,listWidth+16,std::min(visible,(int)artworks.size())*rowHeight+16);
-    for(int row=0;row<visible&&top+row<(int)artworks.size();row++){
-      int index=top+row,itemY=startY+row*rowHeight,textY=itemY+(rowHeight-fontHeight(g_font))/2; bool current=index==sel;
-      if(current) drawRowHighlight(listX,itemY,listWidth,rowHeight-3);
-      std::string label="Artwork "+std::to_string(index+1);
-      drawText(g_font,listX+26,textY,label.c_str(),current?COL_VAL:COL_TXT);
-      if(artworks[index].width>0&&artworks[index].height>0){
-        std::string dimensions=std::to_string(artworks[index].width)+"x"+std::to_string(artworks[index].height);
-        drawTextR(g_font_sm,listX+listWidth-20,textY+(fontHeight(g_font)-fontHeight(g_font_sm))/2,dimensions.c_str(),current?COL_VAL:COL_DIM);
-      }
-    }
-    drawArtworkPreview(loaded==sel?preview:nullptr,layout.preview,loaded==sel);
-    if(loaded==sel&&previewFailed){
-      const SDL_Rect &rect=layout.preview;
-      fillRect(rect.x,rect.y,rect.w,rect.h,COL_CARD);
-      drawWrapped(g_font_sm,rect.x+16,rect.y+rect.h/2-30,rect.w-32,fontHeight(g_font_sm)+6,3,
-                  tr("Preview unavailable"),COL_DIM);
-    }
-    FootItem footer[]={{"A","Use artwork",FA_NONE},{"B","Back",FA_NONE}};
-    drawFooterHints(footer,2,SH-26);
+    drawArtworkPicker(artworks,gameName,background,sel,top,loaded==sel?preview:nullptr,loaded==sel&&previewFailed);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextFrame();
   }
 }
@@ -6234,11 +6114,42 @@ static void downloadCover(Game &g) {
   int artworkIndex=chooseCoverArtwork(artworks,selectedGame.name.c_str());
   if(artworkIndex<0) return;
   std::atomic_bool downloadCancel{false};
-  runBusyTask("Downloading selected cover",selectedGame.name,
-              [&]{ result=griddb_download_image(artworks[artworkIndex].url,coverPath(g),&downloadCancel); },&downloadCancel);
+  runBusyTask("Downloading selected cover",selectedGame.name,[&]{
+    result=griddb_download_image(artworks[artworkIndex].url,coverPath(g),&downloadCancel);
+  },&downloadCancel);
+  if(result!=GRIDDB_OK){
+    if(!downloadCancel.load(std::memory_order_acquire)) toastStatic("Cover download failed");
+    return;
+  }
+  reloadCover(g);
+  storeSet(g_global,artworkKey(g,"GameId").c_str(),std::to_string(selectedGame.id).c_str());
+  storeSet(g_global,artworkKey(g,"BackgroundMissing").c_str(),"false");
+  storeSave(g_global,LAUNCHER_INI);
   if(downloadCancel.load(std::memory_order_acquire)) return;
-  if(result==GRIDDB_OK){ reloadCover(g); toastStatic("Cover downloaded"); }
-  else toastStatic("Cover download failed");
+  std::vector<GridDbArtwork> backgrounds;
+  std::atomic_bool backgroundCancel{false};
+  runBusyTask("Loading background artwork",selectedGame.name,[&]{
+    result=griddb_fetch_backgrounds(key,selectedGame.id,backgrounds,&backgroundCancel);
+  },&backgroundCancel);
+  if(backgroundCancel.load(std::memory_order_acquire)) return;
+  if(result==GRIDDB_NOT_FOUND){
+    storeSet(g_global,artworkKey(g,"BackgroundMissing").c_str(),"true");
+    storeSave(g_global,LAUNCHER_INI);
+    toastStatic("Cover downloaded. No background artwork was found.");
+    return;
+  }
+  if(result!=GRIDDB_OK){
+    modalMessage(uiText("Background search failed").c_str(),{uiText("Cover downloaded"),uiText(gridDbErrorText(result))});
+    return;
+  }
+  const int backgroundIndex=chooseCoverArtwork(backgrounds,selectedGame.name.c_str(),true);
+  if(backgroundIndex<0){ toastStatic("Cover downloaded");return; }
+  runBusyTask("Downloading selected background",selectedGame.name,[&]{
+    result=griddb_download_image(backgrounds[backgroundIndex].url,backgroundPath(g),&backgroundCancel);
+  },&backgroundCancel);
+  if(result==GRIDDB_OK){ reloadBackground(g);toastStatic("Cover and background downloaded"); }
+  else if(!backgroundCancel.load(std::memory_order_acquire))
+    modalMessage(uiText("Background download failed").c_str(),{uiText("Cover downloaded"),uiText(gridDbErrorText(result))});
 }
 
 static void importCoverFromFile(Game &g) {
@@ -6290,7 +6201,7 @@ static void coverSettings(Game &g) {
   const char *titles[2]={"Download from SteamGridDB","Import cover from file"};
   const char *kinds[2]={"Online artwork","Local image"};
   const char *descriptions[2]={
-    "Search SteamGridDB and replace this game's custom cover with selected online artwork.",
+    "Choose a game cover, then select optional background artwork for the Classic theme.",
     "Choose a PNG, JPEG, WebP or BMP image from SD, USB or SMB storage. It is validated and saved safely as PNG."
   };
   const auto inside=[](const SDL_Rect &r,int x,int y){return x>=r.x&&x<r.x+r.w&&y>=r.y&&y<r.y+r.h;};
@@ -6335,8 +6246,8 @@ static void coverSettings(Game &g) {
       drawWrapped(g_font_sm,x,card.y+112,width,fontHeight(g_font_sm)+7,
                   std::max(1,(card.h-132)/(fontHeight(g_font_sm)+7)),tr(descriptions[index]),COL_DIM);
     }
-    if(hasCustom){FootItem hints[]={{"A","Choose",FA_NONE},{"Y","Remove custom cover",FA_NONE},{"B","Back",FA_NONE}};drawFooterHints(hints,3,SH-26);}
-    else{FootItem hints[]={{"A","Choose",FA_NONE},{"B","Back",FA_NONE}};drawFooterHints(hints,2,SH-26);}
+    if(hasCustom){FootItem hints[]={{"A","Choose"},{"Y","Remove custom cover"},{"B","Back"}};drawFooterHints(hints,3,SH-26);}
+    else{FootItem hints[]={{"A","Choose"},{"B","Back"}};drawFooterHints(hints,2,SH-26);}
     drawFadeIn();SDL_RenderPresent(g_ren);waitForNextFrame();
   }
 }
@@ -6349,35 +6260,63 @@ static void downloadAllCovers() {
     else { toastStatic("A SteamGridDB API key is required"); return; }
   }
   mkdir(COVERS_DIR,0777);
-  struct CoverJob { std::string gameKey,title,path; };
+  struct CoverJob { std::string gameKey,title,cover,background; long id=0; };
+  struct ArtworkResult { std::string gameKey; long id=0; bool cover=false,background=false,backgroundMissing=false; };
   std::vector<CoverJob> pending;
-  for(int index=0;index<(int)g_games.size();index++)
-    if(!g_games[index].biosBoot&&!regularFileExists(existingCoverPath(g_games[index])))
-      pending.push_back({g_games[index].key,g_games[index].title,coverPath(g_games[index])});
-  if(pending.empty()){ toastStatic("All covers already downloaded"); return; }
+  for(const Game &game:g_games){
+    if(game.biosBoot) continue;
+    const bool cover=!regularFileExists(existingCoverPath(game));
+    const bool background=!regularFileExists(backgroundPath(game))&&
+        strcmp(storeGet(g_global,artworkKey(game,"BackgroundMissing").c_str(),"false"),"true");
+    if(cover||background)
+      pending.push_back({game.key,game.title,cover?coverPath(game):std::string{},background?backgroundPath(game):std::string{},
+                        strtol(storeGet(g_global,artworkKey(game,"GameId").c_str(),"0"),nullptr,10)});
+  }
+  if(pending.empty()){ toastStatic("All artwork already downloaded"); return; }
   std::atomic_bool cancel{false};
   std::atomic_int ok{0},fail{0};
-  std::mutex downloadedMutex;
-  std::vector<std::string> downloaded;
-  runBusyTask("Downloading covers",std::to_string(pending.size())+" games queued",[&]{
+  std::vector<ArtworkResult> downloaded;
+  runBusyTask("Downloading artwork",std::to_string(pending.size())+" games queued",[&]{
     for(const auto &job:pending){
       if(cancel.load(std::memory_order_acquire)) break;
-      const int result=griddb_fetch_cover(key,job.title,job.path,&cancel);
-      if(result==GRIDDB_OK){
-        ok.fetch_add(1,std::memory_order_relaxed);
-        std::lock_guard<std::mutex> lock(downloadedMutex); downloaded.push_back(job.gameKey);
-      } else fail.fetch_add(1,std::memory_order_relaxed);
+      ArtworkResult saved;saved.gameKey=job.gameKey;saved.id=job.id;
+      int result=GRIDDB_OK;
+      if(saved.id<=0){
+        std::vector<GridDbGameResult> matches;
+        result=griddb_search_games(key,job.title,matches,&cancel);
+        if(result==GRIDDB_OK) saved.id=matches.front().id;
+      }
+      if(result!=GRIDDB_OK){
+        if(result!=GRIDDB_CANCELLED) fail.fetch_add(1,std::memory_order_relaxed);
+        continue;
+      }
+      bool failed=false;
+      if(!job.cover.empty()){
+        std::vector<GridDbArtwork> artworks;
+        result=griddb_fetch_artworks(key,saved.id,artworks,&cancel);
+        if(result==GRIDDB_OK) result=griddb_download_image(artworks.front().url,job.cover,&cancel);
+        saved.cover=result==GRIDDB_OK;
+        failed=result!=GRIDDB_OK&&result!=GRIDDB_CANCELLED;
+      }
+      if(!job.background.empty()&&!cancel.load(std::memory_order_acquire)){
+        result=griddb_fetch_background(key,saved.id,job.background,&cancel);
+        saved.background=result==GRIDDB_OK;saved.backgroundMissing=result==GRIDDB_NOT_FOUND;
+        failed|=result!=GRIDDB_OK&&result!=GRIDDB_NOT_FOUND&&result!=GRIDDB_CANCELLED;
+      }
+      if(saved.cover||saved.background) ok.fetch_add(1,std::memory_order_relaxed);
+      if(failed) fail.fetch_add(1,std::memory_order_relaxed);
+      downloaded.emplace_back(std::move(saved));
     }
   },&cancel);
-  for(const auto &gameKey:downloaded){
-    const auto game=std::find_if(g_games.begin(),g_games.end(),[&](const auto &item){ return item.key==gameKey; });
-    if(game!=g_games.end()){
-      if(game->cover) SDL_DestroyTexture(game->cover);
-      game->cover=nullptr;
-      game->triedCover=false;
-    }
+  for(const auto &saved:downloaded) if(Game *game=findGameByKey(saved.gameKey)){
+    storeSet(g_global,artworkKey(*game,"GameId").c_str(),std::to_string(saved.id).c_str());
+    if(saved.background||saved.backgroundMissing)
+      storeSet(g_global,artworkKey(*game,"BackgroundMissing").c_str(),saved.backgroundMissing?"true":"false");
+    if(saved.cover) reloadCover(*game);
+    if(saved.background) reloadBackground(*game);
   }
-  char message[96]; snprintf(message,sizeof(message),"Covers: %d downloaded, %d failed%s",ok.load(),fail.load(),cancel.load()?" (cancelled)":"");
+  storeSave(g_global,LAUNCHER_INI);
+  char message[128]; snprintf(message,sizeof(message),tr("Artwork: %d updated, %d failed%s"),ok.load(),fail.load(),cancel.load()?tr(" (cancelled)"):"");
   toast(message);
 }
 
@@ -6436,7 +6375,7 @@ static bool pickIcon(Game &g, char *outPath, size_t outSize) {
       if(tex[i]){ SDL_Rect d{x,y,cell,cell}; SDL_RenderCopy(g_ren,tex[i],nullptr,&d); }
       else drawTextC(g_font_sm,x+cell/2,y+cell/2,"?",COL_DIM);
     }
-    FootItem footer[]={{"A","Use icon",FA_NONE},{"B","Back",FA_NONE}};
+    FootItem footer[]={{"A","Use icon"},{"B","Back"}};
     drawFooterHints(footer,2,SH-26);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextFrame();
   }
@@ -6525,7 +6464,7 @@ static void forwarderWizard(Game &g) {
       drawButtonPanel(rx-10,createY-6,rw+20,createH,cur);
       drawTextC(g_font, rx+rw/2, createY-6+(createH-fontHeight(g_font))/2,
                 tr("Create shortcut"), cur?COL_VAL:COL_TXT); }
-    FootItem footer[]={{"A",sel==3?"Create shortcut":"Edit",FA_NONE},{"B","Back",FA_NONE}};
+    FootItem footer[]={{"A",sel==3?"Create shortcut":"Edit"},{"B","Back"}};
     drawFooterHints(footer,2,SH-26);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextFrame();
   }
@@ -6576,7 +6515,7 @@ static int biosGameMenu(Game &g, SDL_GameController *pad) {
       drawSettingsRowText(tr(items[i]),"",startY+i*rowH,mw,mx+24,mx+mw-24,i==sel,
                           i==sel?COL_VAL:COL_TXT,i==sel?COL_VAL:COL_DIM,false,rowH);
     // Two rows, and A does something different on each one.
-    FootItem footer[]={{"A",sel==0?"Launch":"Back",FA_NONE},{"B","Back",FA_NONE}};
+    FootItem footer[]={{"A",sel==0?"Launch":"Back"},{"B","Back"}};
     drawFooterHints(footer,2,SH-26);
     drawFadeIn(); SDL_RenderPresent(g_ren); waitForNextFrame();
   }
@@ -6602,101 +6541,8 @@ static void drawWrappedCentered(TTF_Font *font,int centerX,int y,int maxWidth,in
   if(!line.empty()&&drawn<maxLines) emit(line);
 }
 
-static int dropdownStrings(const char *title,const std::vector<std::string> &values,int current=0)
-{
-  std::vector<const char*> labels; labels.reserve(values.size());
-  for(const auto &value:values) labels.push_back(value.c_str());
-  return dropdown(title,labels.data(),(int)labels.size(),current);
-}
-
-static void manageCollections()
-{
-  for(;;){
-    std::vector<std::string> choices{std::string(g_localization.Translate("Create collection..."))};
-    for(const auto &collection:g_collections)
-      choices.push_back(collection.name+" ("+std::to_string(collection.members.size())+")");
-    int selected=dropdownStrings(tr("Manage collections"),choices,0);
-    if(selected<0) return;
-    if(selected==0){
-      char name[96]{};
-      if(!promptText("Collection name","",name,sizeof(name))) continue;
-      std::string value=trim(name);
-      bool invalid=value.empty()||foldedKey(value)=="favorites"||value.find_first_of(",=")!=std::string::npos||
-        std::any_of(g_collections.begin(),g_collections.end(),[&](const auto &item){ return foldedKey(item.name)==foldedKey(value); });
-      if(invalid){ toastStatic("Invalid or duplicate collection name"); continue; }
-      g_collections.push_back({value,{}}); saveLibraryOrganization();
-      continue;
-    }
-    size_t index=(size_t)(selected-1); if(index>=g_collections.size()) continue;
-    std::vector<std::string> actions{uiText("View collection"),uiText("Rename"),uiText("Delete")};
-    int action=dropdownStrings(g_collections[index].name.c_str(),actions,0);
-    if(action==0){ g_activeCollection=g_collections[index].name; rebuildVisibleGames(); return; }
-    if(action==1){
-      char name[96]{}; if(!promptText("Rename collection",g_collections[index].name.c_str(),name,sizeof(name))) continue;
-      std::string value=trim(name),old=g_collections[index].name;
-      bool invalid=value.empty()||foldedKey(value)=="favorites"||value.find_first_of(",=")!=std::string::npos||
-        std::any_of(g_collections.begin(),g_collections.end(),[&](const auto &item){ return &item!=&g_collections[index]&&foldedKey(item.name)==foldedKey(value); });
-      if(invalid){ toastStatic("Invalid or duplicate collection name"); continue; }
-      g_collections[index].name=value; if(g_activeCollection==old) g_activeCollection=value; saveLibraryOrganization();
-    } else if(action==2&&confirmBox(uiText("Delete collection?").c_str(),{g_collections[index].name,uiText("Games and save data will not be deleted.")})){
-      if(g_activeCollection==g_collections[index].name) g_activeCollection.clear();
-      g_collections.erase(g_collections.begin()+index); saveLibraryOrganization(); rebuildVisibleGames();
-    }
-  }
-}
-
-static void editGameOrganization(Game &game)
-{
-  for(;;){
-    std::vector<std::string> choices;
-    choices.push_back(std::string(g_localization.Translate("Favorite"))+": "+(g_favorites.count(game.key)?tr("Yes"):tr("No")));
-    choices.push_back(g_localization.Translate("Create collection...").data());
-    for(const auto &collection:g_collections)
-      choices.push_back(collection.name+": "+(collection.members.count(game.key)?tr("Yes"):tr("No")));
-    int selected=dropdownStrings(tr("Favorites & collections"),choices,-1);
-    if(selected<0) return;
-    if(selected==0){ if(!g_favorites.erase(game.key)) g_favorites.insert(game.key); }
-    else if(selected==1){
-      char name[96]{}; if(!promptText("Collection name","",name,sizeof(name))) continue;
-      std::string value=trim(name); if(value.empty()||value.find_first_of(",=")!=std::string::npos) continue;
-      auto found=std::find_if(g_collections.begin(),g_collections.end(),[&](const auto &item){ return foldedKey(item.name)==foldedKey(value); });
-      if(found==g_collections.end()){ g_collections.push_back({value,{game.key}}); }
-      else found->members.insert(game.key);
-    } else {
-      Collection &collection=g_collections[(size_t)selected-2];
-      if(!collection.members.erase(game.key)) collection.members.insert(game.key);
-    }
-    saveLibraryOrganization(); rebuildVisibleGames();
-  }
-}
-
-static void libraryFilterMenu()
-{
-  std::vector<std::string> choices{tr("All games"),tr("Favorites")};
-  for(const auto &collection:g_collections) choices.push_back(collection.name);
-  const int manage=(int)choices.size(); choices.push_back(tr("Manage collections..."));
-  const int search=(int)choices.size(); choices.push_back(tr("Search..."));
-  const int clear=(int)choices.size(); if(!g_searchQuery.empty()) choices.push_back(tr("Clear search"));
-  int current=0;
-  if(g_activeCollection=="favorites") current=1;
-  else if(!g_activeCollection.empty()) for(size_t i=0;i<g_collections.size();i++) if(g_collections[i].name==g_activeCollection) current=(int)i+2;
-  int selected=dropdownStrings("Library view",choices,current);
-  if(selected<0) return;
-  if(selected==0) g_activeCollection.clear();
-  else if(selected==1) g_activeCollection="favorites";
-  else if(selected>=2&&selected<manage) g_activeCollection=g_collections[(size_t)selected-2].name;
-  else if(selected==manage) manageCollections();
-  else if(selected==search){
-    char query[128]{};
-    const std::string initial=g_searchQuery;
-    if(promptText("Search games",initial.c_str(),query,sizeof(query))) g_searchQuery=trim(query);
-  }
-  else if(selected==clear) g_searchQuery.clear();
-  rebuildVisibleGames();
-}
-
 static const char *GAME_MENU_ITEMS[]={"Launch","Game settings","Rename game","Cover settings",
-  "Create HOME shortcut","Favorites & collections","Clear game settings","Delete game"};
+  "Create HOME shortcut","Favorite","Clear game settings","Delete game"};
 static constexpr int GAME_MENU_COUNT=8;
 // Everything from this index down is destructive and sits in its own group.
 static constexpr int GAME_MENU_MANAGE_FIRST=6;
@@ -6726,13 +6572,13 @@ static void drawGameMenu(Game &game,int selection){
   drawRowHighlight(menu.x,(int)g_hy,menu.w,layout.rowHeight-4);
   for(int index=0;index<GAME_MENU_COUNT;index++){
     const bool current=index==selection;
-    const bool submenu=index==1||index==3||index==4||index==5;
+    const bool submenu=index==1||index==3||index==4;
     const SDL_Color color=index==GAME_MENU_COUNT-1?(SDL_Color){238,135,135,255}:(current?COL_VAL:COL_TXT);
-    drawSettingsRowText(tr(GAME_MENU_ITEMS[index]),submenu?">":"",layout.rowY(index),menu.w,
+    drawSettingsRowText(tr(GAME_MENU_ITEMS[index]),index==5?(g_favorites.count(game.key)?tr("Yes"):tr("No")):(submenu?">":""),layout.rowY(index),menu.w,
                         menu.x+24,menu.x+menu.w-24,current,color,current?COL_VAL:COL_DIM,false,
                         layout.rowHeight);
   }
-  FootItem footer[]={{"A",selection==0?"Launch":"Select",FA_NONE},{"B","Back",FA_NONE}};
+  FootItem footer[]={{"A",selection==0?"Launch":"Select"},{"B","Back"}};
   drawFooterHints(footer,2,SH-26);
 }
 
@@ -6799,7 +6645,10 @@ static int perGameMenu(Game &g, SDL_GameController *pad) {
           }
           else if(sel==3){ coverSettings(g); beginScreenFx(); }
           else if(sel==4){ forwarderWizard(g); beginScreenFx(); }
-          else if(sel==5){ editGameOrganization(g); beginScreenFx(); }
+          else if(sel==5){
+            if(!g_favorites.erase(g.key)) g_favorites.insert(g.key);
+            saveLibraryOrganization(); rebuildVisibleGames(); beginScreenFx();
+          }
           else if(sel==6){
             g_game.kv.clear(); remove(gp.c_str());
             if(!g.pathKey.empty()) remove(pathGp.c_str());
@@ -6815,6 +6664,9 @@ static int perGameMenu(Game &g, SDL_GameController *pad) {
                 break;
               }
               remove(coverPath(g).c_str());
+              remove(backgroundPath(g).c_str());
+              storeRemovePrefix(g_global,("Artwork/"+g.key+"/").c_str());
+              g_favorites.erase(g.key);saveLibraryOrganization();
               remove(gp.c_str());
               remove(gameCRCFile(g).c_str());
               if(!g.pathKey.empty()){
@@ -7029,6 +6881,81 @@ static void migrateLegacyEmuHosts() {
   }
 }
 
+static std::string libraryTabLabel(int tab){
+  static const char *labels[]={"Recent","All games","Favorites"};
+  return tab>=0&&tab<libraryTabCount()?uiText(labels[tab]):std::string{};
+}
+
+enum class LibraryIcon { Recent, Games, Favorite, Settings };
+
+static void drawLibraryIcon(LibraryIcon icon,int cx,int cy,int size,SDL_Color color){
+  if(icon==LibraryIcon::Settings){
+    if(g_settingsIcon){
+      const SDL_Rect rect{cx-size/2,cy-size/2,size,size};
+      SDL_SetTextureColorMod(g_settingsIcon,color.r,color.g,color.b);
+      SDL_SetTextureAlphaMod(g_settingsIcon,color.a);
+      SDL_RenderCopy(g_ren,g_settingsIcon,nullptr,&rect);
+    }
+  } else if(icon==LibraryIcon::Games){
+    const int cell=std::max(3,size/4),gap=std::max(2,size/7);
+    for(int row=0;row<2;row++) for(int column=0;column<3;column++)
+      roundedRect(cx-(3*cell+2*gap)/2+column*(cell+gap),cy-(2*cell+gap)/2+row*(cell+gap),cell,cell,1,color);
+  } else {
+    const int points=icon==LibraryIcon::Favorite?10:48;
+    const auto point=[&](int index,float radius){
+      const float angle=index*6.2831853f/points-1.5707963f;
+      if(icon==LibraryIcon::Favorite&&index%2) radius*=0.45f;
+      return SDL_FPoint{cx+std::cos(angle)*radius,cy+std::sin(angle)*radius};
+    };
+    std::array<SDL_Vertex,288> vertices;
+    int count=0;
+    for(int i=0;i<points;i++){
+      const SDL_FPoint outer=point(i,size*0.5f),next=point(i+1,size*0.5f);
+      if(icon==LibraryIcon::Favorite){
+        vertices[count++]={{(float)cx,(float)cy},color,{0,0}};
+        vertices[count++]={outer,color,{0,0}}; vertices[count++]={next,color,{0,0}};
+      } else {
+        const SDL_FPoint inner=point(i,size*0.5f-2),innerNext=point(i+1,size*0.5f-2);
+        vertices[count++]={outer,color,{0,0}}; vertices[count++]={next,color,{0,0}};
+        vertices[count++]={inner,color,{0,0}}; vertices[count++]={inner,color,{0,0}};
+        vertices[count++]={next,color,{0,0}}; vertices[count++]={innerNext,color,{0,0}};
+      }
+    }
+    SDL_RenderGeometry(g_ren,nullptr,vertices.data(),count,nullptr,0);
+    if(icon==LibraryIcon::Recent){
+      fillRect(cx-1,cy-size/3,2,size/3+1,color);
+      fillRect(cx,cy-1,size/4,2,color);
+    }
+  }
+}
+
+struct LibraryHeaderLayout {
+  std::array<SDL_Rect,3> tabs;
+  SDL_Rect settings;
+};
+
+static LibraryHeaderLayout libraryHeaderLayout(){
+  LibraryHeaderLayout layout{};
+  int x=40;
+  for(int tab=0;tab<libraryTabCount();tab++){
+    const std::string label=libraryTabLabel(tab);
+    const int width=28+(int)std::lround((12+textW(g_font,label.c_str()))*g_libraryTabOpen[tab]);
+    layout.tabs[tab]={x-12,22,width+24,48};
+    x+=width+32;
+  }
+  layout.settings={SW-82,22,54,48};
+  return layout;
+}
+
+static int libraryHeaderHit(int x,int y){
+  const LibraryHeaderLayout layout=libraryHeaderLayout();
+  SDL_Point point{x,y};
+  if(SDL_PointInRect(&point,&layout.settings)) return libraryTabCount();
+  for(size_t index=0;index<layout.tabs.size();index++)
+    if(SDL_PointInRect(&point,&layout.tabs[index])) return (int)index;
+  return -1;
+}
+
 struct GLay { int cols, rows, cw, chh, gapx, gapy, x0, y0, titleH; };
 static GLay gridLayout(){
   GLay g;
@@ -7036,15 +6963,16 @@ static GLay gridLayout(){
   // The footer reserve is measured from the real hint row, so a footer that
   // wraps to two rows can no longer overlap the covers.
   const auto hints=libraryFooter();
-  int topBar=topBarH()+18,footer=measureFooter(hints.data(),(int)hints.size()).height+12;
-  g.rows=g_gridRows;
+  int topBar=112,footer=std::max(88,measureFooter(hints.data(),(int)hints.size()).height+32);
+  const bool recent=g_libraryView==LibraryView::Recent;
+  g.rows=recent?1:g_gridRows;
   int availH = SH - topBar - footer;
   int caption=g.titleH?g.titleH+8:0;
   int maxCoverH=(availH-(g.rows-1)*g.gapy-g.rows*caption)/g.rows;
   if(maxCoverH<72) maxCoverH=72;
   int margin = 56;
   int autoWidth=maxCoverH*2/3;
-  g.cols=g_gridColumns;
+  g.cols=recent?5:g_gridColumns;
   int maxCoverW=(SW-2*margin-(g.cols-1)*g.gapx)/g.cols;
   g.cw=std::max(48,std::min(autoWidth,maxCoverW));
   g.chh=std::min(maxCoverH,g.cw*3/2);
@@ -7055,8 +6983,66 @@ static GLay gridLayout(){
   g.y0=topBar+std::max(0,(availH-gridH)/2);
   return g;
 }
-static int gridHitTest(int px,int py,int top){
-  GLay L=gridLayout(); int n=(int)g_visibleGames.size();
+static void drawLibraryHeader(){
+  const Uint32 now=SDL_GetTicks();
+  const float dt=std::min(0.05f,(now-g_libraryAnimationTick)/1000.0f);
+  g_libraryAnimationTick=now;
+  for(int tab=0;tab<libraryTabCount();tab++){
+    const float target=tab==libraryTabIndex()?1.0f:0.0f;
+    if(!g_uiAnimations) g_libraryTabOpen[tab]=target;
+    else g_libraryTabOpen[tab]+=(target-g_libraryTabOpen[tab])*(1-std::exp(-18*dt));
+    if(std::fabs(target-g_libraryTabOpen[tab])<0.004f) g_libraryTabOpen[tab]=target;
+    else g_interactionAnimationUntil=now+100;
+  }
+  drawGradient({0,0,SW,140},{0,0,0,110},{0,0,0,0});
+  const LibraryHeaderLayout layout=libraryHeaderLayout();
+  for(int tab=0;tab<libraryTabCount();tab++){
+    const SDL_Rect &rect=layout.tabs[tab];
+    const bool focused=g_libraryHeaderFocused&&g_libraryHeaderSelection==tab;
+    const SDL_Color color=tab==libraryTabIndex()||focused?COL_TXT:COL_DIM;
+    if(focused) roundedPanel(rect.x,rect.y,rect.w,rect.h,{255,255,255,8},COL_SEL,14,2);
+    drawLibraryIcon(tab==0?LibraryIcon::Recent:tab==1?LibraryIcon::Games:LibraryIcon::Favorite,rect.x+26,46,28,color);
+    if(rect.w>52){
+      const SDL_Rect clip{rect.x+52,rect.y,rect.w-52,rect.h};
+      SDL_RenderSetClipRect(g_ren,&clip);
+      drawText(g_font,clip.x,46-fontHeight(g_font)/2,libraryTabLabel(tab).c_str(),color);
+      SDL_RenderSetClipRect(g_ren,nullptr);
+    }
+  }
+  const bool focused=g_libraryHeaderFocused&&g_libraryHeaderSelection==libraryTabCount();
+  if(focused) roundedPanel(layout.settings.x,layout.settings.y,layout.settings.w,layout.settings.h,{255,255,255,8},COL_SEL,14,2);
+  drawLibraryIcon(LibraryIcon::Settings,layout.settings.x+27,46,28,focused?COL_TXT:COL_DIM);
+}
+
+struct RecentLayout { int x,y,focusedWidth,width,titleY; };
+
+static RecentLayout recentLayout(){ return {40,126,240,200,440}; }
+
+static SDL_Rect recentCoverRect(int index,const RecentLayout &layout){
+  const float slot=index-g_recentPosition;
+  const float focus=std::max(0.0f,1.0f-std::fabs(slot));
+  const int step=layout.width+18,expanded=layout.focusedWidth+16-step;
+  const int x=layout.x+(int)std::lround(slot*step+std::clamp(slot,0.0f,1.0f)*expanded);
+  const int width=layout.width+(int)std::lround((layout.focusedWidth-layout.width)*focus);
+  return {x,layout.y,width,width*3/2};
+}
+
+static int gridHitTest(int px,int py,int top,int selection){
+  const int n=(int)g_visibleGames.size();
+  if(g_libraryView==LibraryView::Recent){
+    const RecentLayout recent=recentLayout();
+    SDL_Point point{px,py};
+    if(selection>=0&&selection<n){
+      const SDL_Rect rect=recentCoverRect(selection,recent);
+      if(SDL_PointInRect(&point,&rect)) return selection;
+    }
+    for(int index=std::max(0,(int)std::floor(g_recentPosition)-1);index<std::min(n,(int)std::ceil(g_recentPosition)+6);index++){
+      const SDL_Rect rect=recentCoverRect(index,recent);
+      if(SDL_PointInRect(&point,&rect)) return index;
+    }
+    return -1;
+  }
+  GLay L=gridLayout();
   int rowStride=L.chh+(L.titleH?L.titleH+8:0)+L.gapy;
   for(int r=0;r<L.rows;r++) for(int c=0;c<L.cols;c++){
     int idx=(top+r)*L.cols+c; if(idx>=n) continue;
@@ -7099,93 +7085,123 @@ static void drawScrollTextL(TTF_Font*f,int x,int y,int maxW,const char*s,SDL_Col
   SDL_RenderSetClipRect(g_ren,nullptr);
 }
 
-static void renderGrid(int sel,int top,const char*gamedirLabel){
-  clearUiBackground();
-  g_cover_budget = COVER_REQUEST_BUDGET;
-  Game *selectedGame=visibleGame(sel);
-  if(selectedGame) ensureCover(*selectedGame,true);
-  GLay L=gridLayout();
-  int n=(int)g_visibleGames.size(), per=L.cols*L.rows;
-  int pages=n?(n+per-1)/per:1,pageIndex=n?sel/per:0,page=pageIndex+1;
-  // The selected game names the page; the folder is the eyebrow above it and the
-  // counters plus the sort order sit on the right.
-  const std::string library=uiText("Library");
-  const std::string folder=gamedirLabel?gamedirLabel:"";
-  const std::string eyebrow=library+(folder.empty()?std::string():" \xc2\xb7 "+folder);
-  const std::string summary=std::to_string(n?sel+1:0)+" / "+std::to_string(n)+
-    " \xc2\xb7 "+uiText("Page")+" "+std::to_string(page)+" / "+std::to_string(pages);
-  const std::string sorting=uiText(SORT_NAME[g_sort]);
-  drawPageHeader(selectedGame?selectedGame->title.c_str():library.c_str(),
-                 eyebrow.c_str(),summary.c_str(),sorting.c_str());
+static void drawLibraryCover(Game &game,const SDL_Rect &rect,bool selected){
+  const int x=rect.x,y=rect.y,w=rect.w,h=rect.h;
+  ensureCover(game,true);
+  fillRect(x+4,y+6,w,h,(SDL_Color){0,0,0,55});
+  fillRect(x+2,y+3,w,h,(SDL_Color){0,0,0,70});
+  if(game.cover){
+    const Uint32 elapsed=SDL_GetTicks()-game.coverAt;
+    const Uint8 opacity=!g_uiAnimations?255:elapsed<180?(Uint8)(255*elapsed/180):255;
+    SDL_SetTextureAlphaMod(game.cover,opacity);
+    const Uint8 tint=selected?255:225;
+    SDL_SetTextureColorMod(game.cover,tint,tint,tint);
+    SDL_RenderCopy(g_ren,game.cover,nullptr,&rect);
+    if(game.biosBoot){
+      const int badgeH=std::max(24,h/7);
+      fillRect(x,y+h-badgeH,w,badgeH,(SDL_Color){2,10,32,220});
+      drawTextC(g_font_sm,x+w/2,y+h-badgeH+(badgeH-fontHeight(g_font_sm))/2,
+                fittedText(g_font_sm,"PS2 BIOS",w-8).c_str(),selected?COL_VAL:COL_TXT);
+    }
+  } else {
+    fillRect(x,y,w,h,COL_CARD);
+    drawTextC(g_font_sm,x+w/2,y+h/2-8,fittedText(g_font_sm,tr("NO COVER"),w-12).c_str(),COL_DIM);
+  }
+  border(x,y,w,h,1,(SDL_Color){12,13,18,255});
+  fillRect(x,y,w,1,(SDL_Color){255,255,255,26});
+  if(selected) border(x-3,y-3,w+6,h+6,2,COL_SEL);
+  if(g_showRegionFlags&&game.region>0&&g_flag[game.region]){
+    const int fw=std::clamp(w*26/100,16,30),fh=fw*2/3;
+    SDL_Rect flag{x+6,y+6,fw,fh}; SDL_RenderCopy(g_ren,g_flag[game.region],nullptr,&flag);
+    border(flag.x,flag.y,fw,fh,1,(SDL_Color){10,12,18,255});
+  }
+  if(g_showCustomSettingsBadges&&game.hasCfg){
+    const int size=26,icon=18,bx=x+w-size-6,by=y+6;
+    roundedPanel(bx,by,size,size,{8,12,24,232},{235,239,247,80},size/2);
+    drawLibraryIcon(LibraryIcon::Settings,bx+size/2,by+size/2,icon,COL_TXT);
+  }
+  if(g_favorites.count(game.key)){
+    roundedRect(x+w-31,y+h-31,26,26,13,(SDL_Color){8,12,24,225});
+    drawLibraryIcon(LibraryIcon::Favorite,x+w-18,y+h-18,18,COL_VAL);
+  }
+}
 
-  int rowStride=L.chh+(L.titleH?L.titleH+8:0)+L.gapy;
-  for(int r=0;r<L.rows;r++) for(int c=0;c<L.cols;c++){
-    int idx=(top+r)*L.cols+c;
-    if(idx>=n) continue;
-    Game&g=g_games[g_visibleGames[idx]];
-    int x=L.x0+c*(L.cw+L.gapx), y=L.y0+r*rowStride;
-    bool cur=(idx==sel);
-    ensureCover(g,true);
-    fillRect(x+4,y+6,L.cw,L.chh,(SDL_Color){0,0,0,55});
-    fillRect(x+2,y+3,L.cw,L.chh,(SDL_Color){0,0,0,70});
-    if(g.cover){
-      Uint32 el=SDL_GetTicks()-g.coverAt; Uint8 fa=!g_uiAnimations?255:(el<180?(Uint8)(255*el/180):255);
-      SDL_SetTextureAlphaMod(g.cover,fa);
-      SDL_SetTextureColorMod(g.cover,cur?255:225,cur?255:225,cur?255:225);
-      SDL_Rect d={x,y,L.cw,L.chh}; SDL_RenderCopy(g_ren,g.cover,nullptr,&d);
-      if(g.biosBoot){
-        const int badgeH=std::max(24,L.chh/7);
-        fillRect(x,y+L.chh-badgeH,L.cw,badgeH,(SDL_Color){2,10,32,220});
-        const std::string badge=ellipsizedText(g_font_sm,"PS2 BIOS",L.cw-8);
-        drawTextC(g_font_sm,x+L.cw/2,y+L.chh-badgeH+(badgeH-fontHeight(g_font_sm))/2,
-                  badge.c_str(),cur?COL_VAL:COL_TXT);
-      }
-    }
-    else { fillRect(x,y,L.cw,L.chh,COL_CARD);
-      drawTextC(g_font_sm,x+L.cw/2,y+L.chh/2-8,
-                fittedText(g_font_sm,tr("NO COVER"),L.cw-12).c_str(),COL_DIM); }
-    border(x,y,L.cw,L.chh,1,(SDL_Color){12,13,18,255});
-    fillRect(x,y,L.cw,1,(SDL_Color){255,255,255,26});
-    if(cur) border(x-2,y-2,L.cw+4,L.chh+4,2,COL_SEL);
-    if(g_showRegionFlags && g.region>0 && g_flag[g.region]){
-      int fw=L.cw*26/100; if(fw>30)fw=30; if(fw<16)fw=16; int fh=fw*2/3;
-      SDL_Rect fd={x+6,y+6,fw,fh}; SDL_RenderCopy(g_ren,g_flag[g.region],nullptr,&fd);
-      border(x+6,y+6,fw,fh,1,(SDL_Color){10,12,18,255});
-    }
-    if(g_showCustomSettingsBadges && g.hasCfg){ int ds=L.cw/11<12?12:L.cw/11; fillRect(x+L.cw-ds-8,y+8,ds,ds,COL_SEL); border(x+L.cw-ds-8,y+8,ds,ds,2,(SDL_Color){10,12,18,255}); }
-    if(g_showGameTitles) drawTitleCell(x+L.cw/2,L.cw,y+L.chh+6,g.title,cur,cur?COL_VAL:COL_DIM);
+static SDL_Rect libraryEmptyActionRect(){ return {SW/2-148,SH/2+82,296,48}; }
+
+static void drawLibraryEmpty(){
+  const bool scanning=g_libraryScan!=nullptr&&g_games.empty();
+  const char *title=scanning?"Loading game library...":g_libraryView==LibraryView::Recent?"Nothing played yet":
+      g_libraryView==LibraryView::Favorites?"No favorites yet":"No games found";
+  const char *description=scanning?"The first page will appear as soon as it is ready.":
+      g_libraryView==LibraryView::Recent?"Games you launch appear here, most recent first.":
+      g_libraryView==LibraryView::Favorites?"Mark games as favorites from their game menu.":
+      "Add game folders in Settings to populate your library.";
+  drawTextC(g_font_big,SW/2,SH/2-80,tr(title),COL_TXT);
+  drawWrappedCentered(g_font_sm,SW/2,SH/2-22,SW-240,30,2,tr(description),COL_DIM);
+  const SDL_Rect action=libraryEmptyActionRect();
+  roundedPanel(action.x,action.y,action.w,action.h,COL_FOCUS,g_libraryHeaderFocused?COL_DIM:COL_SEL,12);
+  drawTextC(g_font_sm,SW/2,action.y+(action.h-fontHeight(g_font_sm))/2,
+            tr(g_libraryView==LibraryView::All?"Settings":"All games"),COL_TXT);
+}
+
+static void renderGrid(int selection,int top){
+  g_cover_budget=COVER_REQUEST_BUDGET;
+  Game *selected=visibleGame(selection);
+  g_backgroundTarget=selected?selected->key:std::string{};
+  clearUiBackground();
+  if(g_launcherTheme==LauncherTheme::Classic){
+    for(int direction:{-1,1}) if(Game *neighbor=visibleGame(selection+direction))
+      queueCoverDecode(*neighbor,false,true);
   }
-  if(Game *selected=visibleGame(sel))ensureCover(*selected,true);
-  const int prefetchStart=(pageIndex+1)*per;
-  for(int index=prefetchStart;index<std::min(n,prefetchStart+per);index++)
-    ensureCover(g_games[g_visibleGames[index]]);
-  if(n==0){
-    // The empty and scanning states sit on a sized panel instead of floating on
-    // the background, like every other status screen.
-    const bool scanning=g_libraryScan!=nullptr;
-    const int panelWidth=std::min(760,SW-120);
-    const int textTop=scanning?SH/2-22:SH/2;
-    const int textBottom=(scanning?SH/2+28:SH/2)+fontHeight(scanning?g_font_sm:g_font);
-    glassPanel((SW-panelWidth)/2,textTop-32,panelWidth,textBottom-textTop+64);
-    if(scanning){
-      drawTextC(g_font,SW/2,SH/2-22,tr("Loading game library..."),COL_VAL);
-      drawTextC(g_font_sm,SW/2,SH/2+28,tr("The first page will appear as soon as it is ready."),COL_DIM);
-    } else drawTextC(g_font,SW/2,SH/2,tr("No games found"),COL_DIM);
-  }
+  if(selected) ensureCover(*selected,true);
+  const GLay layout=gridLayout();
+  const int count=(int)g_visibleGames.size(),per=layout.cols*layout.rows;
+  const int page=count?selection/per:0;
+  drawLibraryHeader();
+  if(count&&g_libraryView==LibraryView::Recent){
+    const RecentLayout recent=recentLayout();
+    const float target=(float)selection;
+    if(g_recentPosition<0||!g_uiAnimations) g_recentPosition=target;
+    else g_recentPosition+=(target-g_recentPosition)*0.24f;
+    if(std::fabs(target-g_recentPosition)<0.005f) g_recentPosition=target;
+    else g_interactionAnimationUntil=SDL_GetTicks()+100;
+    const SDL_Rect clip{0,recent.y-8,SW,recent.focusedWidth*3/2+16};
+    SDL_RenderSetClipRect(g_ren,&clip);
+    for(int index=std::max(0,(int)std::floor(g_recentPosition)-1);index<std::min(count,(int)std::ceil(g_recentPosition)+6);index++)
+      if(index!=selection) drawLibraryCover(*visibleGame(index),recentCoverRect(index,recent),false);
+    const SDL_Rect focused=recentCoverRect(selection,recent);
+    drawLibraryCover(*selected,focused,!g_libraryHeaderFocused);
+    SDL_RenderSetClipRect(g_ren,nullptr);
+    const int titleX=focused.x+focused.w+16;
+    drawScrollTextL(g_font,titleX,recent.titleY,SW-40-titleX,selected->title.c_str(),COL_TXT);
+  } else if(count){
+    const int rowStride=layout.chh+(layout.titleH?layout.titleH+8:0)+layout.gapy;
+    for(int row=0;row<layout.rows;row++) for(int column=0;column<layout.cols;column++){
+      const int index=(top+row)*layout.cols+column;
+      if(index>=count) continue;
+      Game &game=*visibleGame(index);
+      const SDL_Rect rect{layout.x0+column*(layout.cw+layout.gapx),layout.y0+row*rowStride,layout.cw,layout.chh};
+      const bool current=index==selection&&!g_libraryHeaderFocused;
+      drawLibraryCover(game,rect,current);
+      if(g_showGameTitles) drawTitleCell(rect.x+rect.w/2,rect.w,rect.y+rect.h+6,game.title,current,current?COL_VAL:COL_DIM);
+    }
+    const int prefetchStart=(page+1)*per;
+    for(int index=prefetchStart;index<std::min(count,prefetchStart+per);index++) ensureCover(*visibleGame(index));
+  } else drawLibraryEmpty();
   drawUpdateNotification();
-  // Launch, Sort and the Game Menu all no-op on an empty (or still scanning)
-  // library, and paging is meaningless with a single page. Filter stays: an
-  // active filter is one of the reasons the list can be empty. gridLayout()
-  // still measures the full hint row, so the cover area never shifts.
-  const auto all=libraryFooter();
-  FootItem foot[8];int hintCount=0;
-  for(const FootItem &hint:all){
-    if(!n&&(hint.act==FA_LAUNCH||hint.act==FA_SORT||hint.act==FA_OPTIONS)) continue;
-    if(pages<2&&(hint.act==FA_PAGEL||hint.act==FA_PAGER)) continue;
-    foot[hintCount++]=hint;
+  if(g_libraryHeaderFocused){
+    FootItem hints[]={{"A",g_libraryHeaderSelection==libraryTabCount()?"Settings":"Open"},{"B","Back"}};
+    drawFooterHints(hints,2,SH-50);
+  } else {
+    if(count){
+      const auto hints=libraryFooter();
+      drawFooterHints(hints.data(),(int)hints.size(),SH-50);
+    } else {
+      FootItem hints[]={{"A",g_libraryView==LibraryView::All?"Settings":"All games"},{"B","Quit"}};
+      drawFooterHints(hints,2,SH-50);
+    }
   }
-  drawFooterHints(foot,hintCount,SH-26);
-  SDL_RenderPresent(g_ren);
+  drawFadeIn(); SDL_RenderPresent(g_ren);
 }
 
 static int gridNav(int sel,int dx,int dy,int cols,int rows,int n){
@@ -7234,11 +7250,11 @@ static void cleanupLauncher() {
   SwitchStorage::SetUsbStatusCallback(nullptr);
   stopStorageWorkers();
   saveLibraryIdentities();
-  for(auto &game:g_games){ if(game.cover) SDL_DestroyTexture(game.cover); game.cover=nullptr; }
+  for(auto &game:g_games) releaseGameArtwork(game);
   clearTextCaches();
   for(int index=1;index<4;index++){ if(g_flag[index]) SDL_DestroyTexture(g_flag[index]); g_flag[index]=nullptr; }
-  SDL_Texture **glyphs[]={&g_gA,&g_gB,&g_gX,&g_gY,&g_gPlus,&g_gMinus,&g_gL,&g_gR,
-                          &g_gLeftRight,&g_gUpDown,&g_gTouch};
+  SDL_Texture **glyphs[]={&g_gA,&g_gB,&g_gX,&g_gY,&g_gPlus,
+                          &g_gLeftRight,&g_gUpDown,&g_gTouch,&g_settingsIcon};
   for(SDL_Texture **glyph:glyphs){ if(*glyph) SDL_DestroyTexture(*glyph); *glyph=nullptr; }
   if(g_logo) SDL_DestroyTexture(g_logo);
   g_logo=nullptr;
@@ -7250,7 +7266,8 @@ static void cleanupLauncher() {
   if(g_font_sm) TTF_CloseFont(g_font_sm);
   if(g_font_big) TTF_CloseFont(g_font_big);
   if(g_font_caption) TTF_CloseFont(g_font_caption);
-  g_font=g_font_sm=g_font_big=g_font_caption=nullptr;
+  if(g_font_hint) TTF_CloseFont(g_font_hint);
+  g_font=g_font_sm=g_font_big=g_font_caption=g_font_hint=nullptr;
   g_loadedFontType=PlSharedFontType_Total;
   if(g_plReady) plExit();
   g_plReady=false;
@@ -7442,7 +7459,8 @@ int main(int argc, char **argv){
   struct stat configStat{};
   bool firstRun=stat(LAUNCHER_INI,&configStat)!=0;
   storeLoad(g_global,LAUNCHER_INI);
-  const bool settingsNormalized=normalizeLsfgStore(g_global) |
+  const bool settingsNormalized=normalizeLauncherTheme(g_global) |
+                                normalizeLsfgStore(g_global) |
                                 removeLegacySmcSettings(g_global) |
                                 removeLegacyCheatGate(g_global) |
                                 normalizeRetroAchievementsStore(g_global);
@@ -7451,8 +7469,6 @@ int main(int argc, char **argv){
   storeLoad(g_library,LIBRARY_INI);
   loadLibraryIdentities();
   loadLibraryOrganization();
-  int sortMode=atoi(storeGet(g_global,"Wrapper/SortMode","0"));
-  if(sortMode>=0&&sortMode<SORT_COUNT) g_sort=sortMode;
   if(firstRun){
     g_active=&g_global;
     saveGameSources({DEF_GAMEDIR});
@@ -7548,7 +7564,6 @@ int main(int argc, char **argv){
     game.pathKey=makeLegacyPathKey(game.file,game.path);
     game.fileSize=static_cast<uint64_t>(info.st_size);
     game.modified=static_cast<long long>(info.st_mtime);
-    game.added=game.modified;
 
     for(const auto &record:g_libraryIdentities){
       if(pathIdentity(record.canonicalPath)==pathIdentity(game.path)&&
@@ -7581,6 +7596,51 @@ int main(int argc, char **argv){
   bool forwarderPending=forwarderRequested&&!forwarderMatched;
   const Uint32 forwarderDeadline=forwarderPending?SDL_GetTicks()+15000:0;
   if(forwarderPending&&!usbRefreshAt) usbRefreshAt=SDL_GetTicks()+300;
+  auto changeLibraryTab=[&](int tab){
+    selectLibraryTab(tab,sel);
+    keepLibrarySelection=true;
+    top=0;
+  };
+  auto openLibrarySettings=[&](){
+    const std::vector<std::string> oldPaths=gamePaths;
+    const std::string selected=visibleGame(sel)?visibleGame(sel)->key:std::string{};
+    g_active=&g_global;
+    runSettingsRoot(g_pad,nullptr,nullptr);
+    storeSave(g_global,LAUNCHER_INI);
+    gamePaths=loadGameSources();
+    if(gamePaths!=oldPaths||g_rescanAfterSettings){
+      hasUsbSource=hasConfiguredUsbSource(gamePaths);
+      if(hasUsbSource) startUsbInitialization();
+      usbGeneration=SwitchStorage::UsbStatusGeneration();
+      usbRefreshAt=0;
+      refreshConfiguredUsbSources(gamePaths);
+      scanGames(gamePaths);
+      sel=top=0;
+      keepLibrarySelection=false;
+      g_rescanAfterSettings=false;
+    } else sel=visibleIndexForKey(selected);
+    g_recentPosition=-1;
+    beginScreenFx();
+  };
+  auto activateLibraryEmpty=[&](){
+    if(g_libraryView==LibraryView::All) openLibrarySettings();
+    else changeLibraryTab(1);
+    g_libraryHeaderFocused=false;
+    g_recentPosition=-1;
+    beginScreenFx();
+  };
+  auto activateLibraryHeader=[&](int item){
+    if(item<libraryTabCount()){
+      changeLibraryTab(item);
+      g_libraryHeaderFocused=false;
+    } else openLibrarySettings();
+  };
+  auto pageLibrary=[&](int direction){
+    const GLay layout=gridLayout();
+    sel=gridPage(sel,direction,layout.cols,layout.rows,(int)g_visibleGames.size());
+    keepLibrarySelection=true;
+    g_libraryHeaderFocused=false;
+  };
   while(running&&beginUiFrame()){
     if(g_libraryScan){
       std::string selectedKey;
@@ -7691,96 +7751,111 @@ int main(int argc, char **argv){
       waitForNextFrame();
       continue;
     }
-    GLay layout=gridLayout(); int cols=layout.cols; rows=layout.rows;
-    // `top` is derived from the selection, never tracked separately.
-    top=g_visibleGames.empty()?0:(sel/(cols*rows))*rows;
     SDL_Event event; navRepeat();
-    while(pollUiEvent(event)){
+    while(running&&pollUiEvent(event)){
       pumpStick(event);
-      int tx=0,ty=0,n=(int)g_visibleGames.size(); TouchKind touch=touchFeed(event,&tx,&ty);
-      if(touch==TOUCH_SWIPE_L||touch==TOUCH_SWIPE_R){ keepLibrarySelection=true; sel=gridPage(sel,touch==TOUCH_SWIPE_L?1:-1,cols,rows,n); top=n?(sel/(cols*rows))*rows:0; continue; }
+      const GLay layout=gridLayout();
+      const int cols=layout.cols;
+      rows=layout.rows;
+      const int count=(int)g_visibleGames.size();
+      sel=count?std::clamp(sel,0,count-1):0;
+      top=count?(sel/(cols*rows))*rows:0;
+      if(event.type==SDL_CONTROLLERAXISMOTION&&
+         (event.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERLEFT||event.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERRIGHT)){
+        const size_t trigger=event.caxis.axis==SDL_CONTROLLER_AXIS_TRIGGERLEFT?0:1;
+        const bool pressed=event.caxis.value>18000;
+        if(pressed&&!g_libraryTriggers[trigger]) pageLibrary(trigger?1:-1);
+        g_libraryTriggers[trigger]=pressed;
+        continue;
+      }
+      int tx=0,ty=0;
+      const TouchKind touch=touchFeed(event,&tx,&ty);
+      if(touch==TOUCH_SWIPE_L||touch==TOUCH_SWIPE_R){
+        const int direction=touch==TOUCH_SWIPE_L?1:-1;
+        if(g_touch.y0<88) changeLibraryTab((libraryTabIndex()+direction+libraryTabCount())%libraryTabCount());
+        else pageLibrary(direction);
+        continue;
+      }
+      if(touch==TOUCH_SCROLL_UP||touch==TOUCH_SCROLL_DOWN){
+        const int step=(touch==TOUCH_SCROLL_UP?1:-1)*g_touchScrollSteps;
+        if(count) sel=std::clamp(sel+step*(g_libraryView==LibraryView::Recent?1:cols),0,count-1);
+        g_libraryHeaderFocused=false; keepLibrarySelection=true;
+        continue;
+      }
       if(touch==TOUCH_TAP){
-        int action=footTapAct(tx,ty);
-        if(action==FA_NONE){
-          int hit=gridHitTest(tx,ty,top);
-          if(hit>=0){ keepLibrarySelection=true; if(hit==sel&&n) selectGame(*visibleGame(sel)); else sel=hit; }
-        } else {
-          SDL_Event press{}; press.type=SDL_CONTROLLERBUTTONDOWN;
-          switch(action){
-            case FA_LAUNCH: press.cbutton.button=BTN_CONFIRM; SDL_PushEvent(&press); break;
-            case FA_SORT: press.cbutton.button=SDL_CONTROLLER_BUTTON_X; SDL_PushEvent(&press); break;
-            case FA_OPTIONS: press.cbutton.button=SDL_CONTROLLER_BUTTON_START; SDL_PushEvent(&press); break;
-            case FA_SETTINGS: press.cbutton.button=BTN_SETTINGS; SDL_PushEvent(&press); break;
-            case FA_FILTER: press.cbutton.button=SDL_CONTROLLER_BUTTON_BACK; SDL_PushEvent(&press); break;
-            case FA_PAGEL: sel=gridPage(sel,-1,cols,rows,n); break;
-            case FA_PAGER: sel=gridPage(sel,1,cols,rows,n); break;
-            case FA_QUIT: press.cbutton.button=BTN_CANCEL; SDL_PushEvent(&press); break;
+        keepLibrarySelection=true;
+        const int header=libraryHeaderHit(tx,ty);
+        if(header>=0){ activateLibraryHeader(header); continue; }
+        {
+          SDL_Point point{tx,ty};
+          const SDL_Rect emptyAction=libraryEmptyActionRect();
+          if(!count&&SDL_PointInRect(&point,&emptyAction)){ activateLibraryEmpty(); continue; }
+          const int hit=gridHitTest(tx,ty,top,sel);
+          if(hit>=0){
+            if(hit==sel&&!g_libraryHeaderFocused) selectGame(*visibleGame(sel));
+            else sel=hit;
+            g_libraryHeaderFocused=false;
           }
         }
-        top=n?(sel/(cols*rows))*rows:0;
-        if(!running) break;
         continue;
       }
       if(event.type!=SDL_CONTROLLERBUTTONDOWN) continue;
       keepLibrarySelection=true;
       switch(event.cbutton.button){
-        case SDL_CONTROLLER_BUTTON_DPAD_LEFT: sel=gridNav(sel,-1,0,cols,rows,n); break;
-        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: sel=gridNav(sel,1,0,cols,rows,n); break;
-        case SDL_CONTROLLER_BUTTON_DPAD_UP: sel=gridNav(sel,0,-1,cols,rows,n); break;
-        case SDL_CONTROLLER_BUTTON_DPAD_DOWN: sel=gridNav(sel,0,1,cols,rows,n); break;
-        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: sel=gridPage(sel,-1,cols,rows,n); break;
-        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: sel=gridPage(sel,1,cols,rows,n); break;
-        case SDL_CONTROLLER_BUTTON_BACK: {
-          std::string keep=visibleGame(sel)?visibleGame(sel)->key:std::string{};
-          libraryFilterMenu(); sel=0;
-          if(!keep.empty()) for(int index=0;index<(int)g_visibleGames.size();index++)
-            if(visibleGame(index)&&visibleGame(index)->key==keep){ sel=index; break; }
-          beginScreenFx();
+        case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: {
+          const int direction=event.cbutton.button==SDL_CONTROLLER_BUTTON_DPAD_LEFT?-1:1;
+          if(g_libraryHeaderFocused)
+            g_libraryHeaderSelection=(g_libraryHeaderSelection+direction+libraryTabCount()+1)%(libraryTabCount()+1);
+          else sel=gridNav(sel,direction,0,cols,rows,count);
           break;
         }
-        case SDL_CONTROLLER_BUTTON_X:
-          if(n){
-            std::string keep=visibleGame(sel)->key; g_sort=(g_sort+1)%SORT_COUNT;
-            storeSet(g_global,"Wrapper/SortMode",std::to_string(g_sort).c_str()); storeSave(g_global,LAUNCHER_INI);
-            applySort(); sel=0; for(int index=0;index<n;index++) if(visibleGame(index)&&visibleGame(index)->key==keep){ sel=index; break; }
+        case SDL_CONTROLLER_BUTTON_DPAD_UP:
+          if(!g_libraryHeaderFocused&&(!count||sel%(cols*rows)<cols)){
+            g_libraryHeaderFocused=true; g_libraryHeaderSelection=libraryTabIndex();
+          } else if(!g_libraryHeaderFocused) sel=gridNav(sel,0,-1,cols,rows,count);
+          break;
+        case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+          if(g_libraryHeaderFocused) g_libraryHeaderFocused=false;
+          else sel=gridNav(sel,0,1,cols,rows,count);
+          break;
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+          changeLibraryTab((libraryTabIndex()+libraryTabCount()-1)%libraryTabCount());
+          break;
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+          changeLibraryTab((libraryTabIndex()+1)%libraryTabCount());
+          break;
+        case BTN_CONFIRM:
+          if(g_libraryHeaderFocused) activateLibraryHeader(g_libraryHeaderSelection);
+          else if(count) selectGame(*visibleGame(sel));
+          else activateLibraryEmpty();
+          break;
+        case BTN_Y:
+          if(!g_libraryHeaderFocused) if(Game *game=visibleGame(sel)){
+            const std::string selectedKey=game->key;
+            const int result=perGameMenu(*game,g_pad);
+            if(result==1) selectGame(*game);
+            else if(result==2){ scanGames(gamePaths); sel=top=0; keepLibrarySelection=false; }
+            else { sortLibraryGames(); sel=visibleIndexForKey(selectedKey); }
+            g_recentPosition=-1;
+            beginScreenFx();
           }
           break;
-        case BTN_CONFIRM: if(n) selectGame(*visibleGame(sel)); break;
-        case SDL_CONTROLLER_BUTTON_START:
-          if(n){ Game *game=visibleGame(sel); int result=perGameMenu(*game,g_pad); if(result==1) selectGame(*game); else if(result==2){ scanGames(gamePaths); sel=top=0; keepLibrarySelection=false; } }
-          break;
-        case BTN_SETTINGS: {
-          std::vector<std::string> oldPaths=gamePaths;
-          g_active=&g_global; runSettingsRoot(g_pad,nullptr,nullptr); storeSave(g_global,LAUNCHER_INI);
-          layout=gridLayout(); cols=layout.cols; rows=layout.rows;
-          gamePaths=loadGameSources();
-          if(gamePaths!=oldPaths||g_rescanAfterSettings){
-            hasUsbSource=hasConfiguredUsbSource(gamePaths);
-            if(hasUsbSource) startUsbInitialization();
-            usbGeneration=SwitchStorage::UsbStatusGeneration();
-            usbRefreshAt=0;
-            refreshConfiguredUsbSources(gamePaths);
-            scanGames(gamePaths);
-            sel=top=0;
-            keepLibrarySelection=false;
-            g_rescanAfterSettings=false;
-          }
-          break;
-        }
         case BTN_CANCEL:
-          if(confirmBox(tr("Exit NetherSX2?"),
-                        {tr("Active scans and network operations will be cancelled safely."),
-                         tr("Return to the HOME Menu?")})){
-            userExit=true;
-            running=false;
+          if(g_libraryHeaderFocused) g_libraryHeaderFocused=false;
+          else if(confirmBox(tr("Exit NetherSX2?"),
+                              {tr("Active scans and network operations will be cancelled safely."),tr("Return to the HOME Menu?")})){
+            userExit=true; running=false;
           }
           break;
       }
-      top=n?(sel/(cols*rows))*rows:0;
     }
+    const GLay layout=gridLayout();
+    const int count=(int)g_visibleGames.size();
+    sel=count?std::clamp(sel,0,count-1):0;
+    top=count?(sel/(layout.cols*layout.rows))*layout.rows:0;
     pollUpdateNotification();
-    const std::string location=visibleGame(sel)?gameLocationLabel(*visibleGame(sel)):"No game selected";
-    renderGrid(sel,top,location.c_str());
+    renderGrid(sel,top);
     waitForNextFrame(g_libraryScan!=nullptr);
   }
   if(userExit&&g_ren){
