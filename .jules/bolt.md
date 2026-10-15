@@ -1,0 +1,3 @@
+## 2024-10-15 - Using std::string_view for INI parsing
+**Learning:** Passing and returning `std::string` by value in C++ functions like `Trim` causes unnecessary heap allocations and temporary object creation when parsing string streams like INI files. Using `std::string_view` allows string manipulation and reading without copying, saving significant overhead per line parsed. The views should only be realized into explicit `std::string` objects at the final insertion point.
+**Action:** Default to `std::string_view` for string parsing utilities that don't need to mutate the original source buffer.
