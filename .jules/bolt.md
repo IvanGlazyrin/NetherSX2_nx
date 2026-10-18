@@ -1,0 +1,3 @@
+## 2023-11-20 - String View Conversions in C++
+**Learning:** Refactoring C++ code to use `std::string_view` for parsing can eliminate a huge number of temporary heap allocations. However, it requires ensuring that implicit conversions back to `std::string` are made explicit, especially in C++17/20, to prevent compile-time errors. Further, any views generated must never outlive the underlying buffer they point to.
+**Action:** Next time I optimize string parsing, I will systematically trace `std::string` arguments passed by value or `const std::string&` that are only read or sliced. I will convert these to `std::string_view` while ensuring all local callers supply valid buffer lifetimes, explicitly inserting `std::string()` constructors at storage boundaries.
