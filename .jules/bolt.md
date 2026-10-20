@@ -1,0 +1,3 @@
+## 2024-05-24 - Avoid temporary std::string objects in trimming
+**Learning:** Returning `std::string` by value and taking `std::string` by value in `Trim()` creates unnecessary memory allocations and copies. By switching to `std::string_view` for both the input and the return value, and avoiding `substr` calls on `std::string` before creating the view, we can completely eliminate these intermediate heap allocations during string parsing.
+**Action:** Replace `std::string Trim(std::string value)` with `std::string_view Trim(std::string_view value)` in `source/switch/SwitchStorage.cpp` and update `ReadIni` to use `std::string_view` for intermediate variables, converting to `std::string` only at the final assignment.
