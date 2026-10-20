@@ -85,9 +85,9 @@ static const char* tr(const char* source)
   return source ? g_localization.Translate(source).data() : "";
 }
 
-static std::string trim(const std::string &s) {
+static std::string_view trim(std::string_view s) {
   size_t a = s.find_first_not_of(" \t\r\n");
-  if (a == std::string::npos) return "";
+  if (a == std::string_view::npos) return "";
   size_t b = s.find_last_not_of(" \t\r\n");
   return s.substr(a, b - a + 1);
 }
@@ -132,12 +132,13 @@ static void storeLoad(Store &s, const char *path) {
   if (!f) return;
   char line[2048];
   while (fgets(line, sizeof(line), f)) {
-    std::string t = trim(line);
+    std::string_view t = trim(line);
     if (t.empty() || t[0] == '#' || t[0] == ';' || t[0] == '[') continue;
     size_t eq = t.find('=');
-    if (eq == std::string::npos) continue;
-    std::string k = trim(t.substr(0, eq)), v = trim(t.substr(eq + 1));
-    if (!k.empty()) s.kv.push_back({ k, v });
+    if (eq == std::string_view::npos) continue;
+    std::string_view k = trim(t.substr(0, eq));
+    std::string_view v = trim(t.substr(eq + 1));
+    if (!k.empty()) s.kv.push_back({ std::string(k), std::string(v) });
   }
   fclose(f);
 }
